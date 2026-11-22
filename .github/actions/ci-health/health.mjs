@@ -56,13 +56,14 @@ export function summarize(runs, { prev, since }) {
   const latest = done[0] ?? null;
   const state = !latest ? "unknown" : latest.conclusion === "success" ? "green" : "red";
 
-  let red_since = null;
+  // Only green ends a streak; unknown carries it forward.
+  const kept = prev.state === "green" ? null : (prev.red_since ?? null);
+  let red_since = state === "unknown" ? kept : null;
   if (state === "red") {
     const green = done.findIndex((r) => r.conclusion === "success");
     if (green > 0) red_since = done[green - 1].created_at;
     // The streak is older than anything fetched.
-    else if (prev.state === "red" && prev.red_since) red_since = prev.red_since;
-    else red_since = done[done.length - 1].created_at;
+    else red_since = kept ?? done[done.length - 1].created_at;
   }
 
   const durations = done
@@ -128,7 +129,9 @@ export function parseMarker(body) {
   if (!match) return {};
   try {
     const marker = JSON.parse(match[1]);
-    return marker && typeof marker === "object" ? marker : {};
+    if (!marker || typeof marker !== "object") return {};
+    if (typeof marker.red_since !== "string") delete marker.red_since;
+    return marker;
   } catch {
     // A hand-edited marker shouldn't fail the run.
     return {};

@@ -57,6 +57,15 @@ test("a new streak with no green fetched starts at the oldest failure", () => {
   assert.equal(r.red_since, run(21, "failure").created_at);
 });
 
+test("an unknown report carries the streak start until a green one", () => {
+  const prev = { state: "red", red_since: "2026-10-01T00:00:00Z" };
+  const unknown = summarize([], { prev, since });
+  assert.equal(unknown.red_since, "2026-10-01T00:00:00Z");
+  const red = summarize([run(22, "failure")], { prev: unknown, since });
+  assert.equal(red.red_since, "2026-10-01T00:00:00Z");
+  assert.equal(summarize([], { prev: { state: "green", red_since: null }, since }).red_since, null);
+});
+
 test("percentiles are nearest-rank over runs in the window", () => {
   const runs = [run(22, "success", 2), run(21, "success", 8), run(20, "failure", 4), run(10, "success", 60)];
   const r = summarize(runs, { prev: {}, since });
@@ -109,4 +118,5 @@ test("a missing, edited or CRLF marker", () => {
   assert.deepEqual(parseMarker("no marker here"), {});
   assert.deepEqual(parseMarker("<!-- ci-health {broken -->"), {});
   assert.deepEqual(parseMarker('<!-- ci-health {"state":"red"} -->\r\nrest'), { state: "red" });
+  assert.deepEqual(parseMarker('<!-- ci-health {"state":"red","red_since":42} -->'), { state: "red" });
 });

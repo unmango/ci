@@ -49,10 +49,29 @@
                 touch $out
               '';
 
+          checks.types =
+            pkgs.runCommand "actions-types"
+              {
+                src = lib.fileset.toSource {
+                  root = ./.;
+                  fileset = lib.fileset.unions [
+                    ./jsconfig.json
+                    ./src
+                  ];
+                };
+                nativeBuildInputs = [ pkgs.typescript ];
+              }
+              ''
+                cd $src
+                tsc -p jsconfig.json
+                touch $out
+              '';
+
           devShells.default = pkgs.mkShellNoCC {
             packages = with pkgs; [
               nixfmt
               nodejs_24
+              typescript
             ];
           };
 

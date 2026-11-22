@@ -27,7 +27,7 @@ export const RUNNERS = {
 };
 
 /**
- * The message after the trace, which quotes source lines any nearby edit changes.
+ * The trace quotes source lines, which any nearby edit changes.
  * @type {(error: string | undefined) => string | undefined}
  */
 const cause = (error) => {
@@ -67,7 +67,6 @@ export function plan(head, base) {
   for (const job of head) {
     const prev = before.get(job.attr);
     if (job.error !== undefined) {
-      // Already broken on base.
       if (cause(prev?.error) !== cause(job.error)) errors.push({ attr: job.attr, error: job.error });
       continue;
     }

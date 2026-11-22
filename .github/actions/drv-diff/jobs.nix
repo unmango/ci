@@ -28,7 +28,7 @@ let
       }) names
     );
 
-  # flakeModules.ci doesn't export its exclude and nightly lists; read them back from its Hercules jobs.
+  # flakeModules.ci exposes its lists only through herculesCI.
   hci = outputs.herculesCI or null;
   hasLists = isAttrs hci && hci ? onPush.default.outputs;
   ref = head (hci.ciSystems or [ "x86_64-linux" ]);

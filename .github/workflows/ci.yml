@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # collection-ci.yml's weekly full build.
   schedule:
     - cron: "41 7 * * 1"
 
@@ -44,7 +43,7 @@ jobs:
       linux: true
 
   # This repo's checks stand in for a collection's packages.
-  # Its renovate-resume repeats nix's on main; a second tick changes nothing.
+  # renovate-resume runs twice on main; the second tick is a no-op.
   collection:
     uses: ./.github/workflows/collection-ci.yml
     permissions:

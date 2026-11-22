@@ -174,7 +174,6 @@ export async function collect({ github, repo, workflow, branch, since }) {
 }
 
 /**
- * Reported, but never the state.
  * @param {object} opts
  * @param {Octokit} opts.github
  * @param {Repo} opts.repo

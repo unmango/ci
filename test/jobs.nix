@@ -1,4 +1,3 @@
-# Pure eval tests for drv-diff's jobs.nix, built as a flake check.
 { runCommand, lib }:
 let
   jobs = import ../.github/actions/drv-diff/jobs.nix;

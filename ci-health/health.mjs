@@ -55,7 +55,7 @@ export function olderCommitsMatter(commits, now) {
 	const oldest = commits.at(-1);
 	if (!oldest || now - new Date(oldest.date) <= WINDOW) return true;
 	const { state, resolved } = streak(commits);
-	if (state === 'none') return commits.length < UNCOUNTED_LIMIT;
+	if (state === 'none') return commits.filter(c => now - new Date(c.date) > WINDOW).length < UNCOUNTED_LIMIT;
 	return state === 'red' && !resolved;
 }
 

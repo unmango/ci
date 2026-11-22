@@ -93,6 +93,7 @@ test('olderCommitsMatter looks past uncounted runs for a while', () => {
 	const cancelled = commit(24 * 8, 'cancelled');
 	assert.equal(olderCommitsMatter([cancelled], now), true);
 	assert.equal(olderCommitsMatter(Array(30).fill(cancelled), now), false);
+	assert.equal(olderCommitsMatter([...Array(40).fill(commit(1, 'cancelled')), cancelled], now), true);
 });
 
 const report = (repo, overrides = {}) => ({

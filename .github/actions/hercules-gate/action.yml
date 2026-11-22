@@ -30,9 +30,21 @@ inputs:
 outputs:
   verdict:
     description: pass, fail, or timeout.
+    value: ${{ steps.gate.outputs.verdict }}
   ignored:
     description: Number of statuses on the context ignored because another creator posted them.
+    value: ${{ steps.gate.outputs.ignored }}
 
 runs:
-  using: node24
-  main: index.mjs
+  using: composite
+  steps:
+    - id: gate
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUTS: ${{ toJSON(inputs) }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = await import(`${process.env.ACTION_PATH}/../../../src/gate.mjs`);
+          await run({ github, core, inputs: JSON.parse(process.env.INPUTS) });

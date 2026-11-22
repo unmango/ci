@@ -10,7 +10,7 @@ export function tickRebase(body) {
 export function isCandidate(pr, { repo, prefix, label }) {
   return (
     pr.head.ref.startsWith(prefix) &&
-    pr.head.repo?.full_name === repo &&
+    pr.head.repo?.full_name === `${repo.owner}/${repo.repo}` &&
     !pr.labels.some((l) => l.name === label)
   );
 }
@@ -21,39 +21,62 @@ export function latestRun(runs, { completed = false } = {}) {
     .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at) || b.id - a.id)[0];
 }
 
-async function runsFor({ api, repo, sha, checkName, appId }) {
-  const q = new URLSearchParams({ check_name: checkName, app_id: String(appId), filter: "all", per_page: "100" });
-  return (await api.get(`/repos/${repo}/commits/${sha}/check-runs?${q}`)).check_runs;
+async function runsFor({ github, repo, sha, checkName, appId }) {
+  const { data } = await github.request("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", {
+    ...repo,
+    ref: sha,
+    check_name: checkName,
+    app_id: appId,
+    filter: "all",
+    per_page: 100,
+  });
+  return data.check_runs;
 }
 
-export async function previousRequiredFailed({ api, repo, before, checkName, appId, depth }) {
+export async function previousRequiredFailed({ github, repo, before, checkName, appId, depth }) {
   if (!before || /^0+$/.test(before)) return false;
-  const commits = await api.get(`/repos/${repo}/commits?sha=${before}&per_page=${depth}`);
+  const { data: commits } = await github.request("GET /repos/{owner}/{repo}/commits", { ...repo, sha: before, per_page: depth });
   for (const { sha } of commits) {
-    const latest = latestRun(await runsFor({ api, repo, sha, checkName, appId }), { completed: true });
+    const latest = latestRun(await runsFor({ github, repo, sha, checkName, appId }), { completed: true });
     if (latest) return failed(latest);
   }
   return false;
 }
 
-export async function resume({ api, repo, before, checkName, appId, depth, prefix, label, log }) {
-  if (!(await previousRequiredFailed({ api, repo, before, checkName, appId, depth }))) {
+export async function resume({ github, repo, before, checkName, appId, depth, prefix, label, log }) {
+  if (!(await previousRequiredFailed({ github, repo, before, checkName, appId, depth }))) {
     log("previous main run did not fail; nothing to resume");
     return [];
   }
   const ticked = [];
-  const prs = await api.paginate(`/repos/${repo}/pulls?state=open&per_page=100`);
+  const prs = await github.paginate("GET /repos/{owner}/{repo}/pulls", { ...repo, state: "open", per_page: 100 });
   for (const pr of prs.filter((p) => isCandidate(p, { repo, prefix, label }))) {
-    const latest = latestRun(await runsFor({ api, repo, sha: pr.head.sha, checkName, appId }));
+    const latest = latestRun(await runsFor({ github, repo, sha: pr.head.sha, checkName, appId }));
     if (latest?.status !== "completed" || !failed(latest)) continue;
     const body = tickRebase(pr.body);
     if (!body) {
       log(`#${pr.number}: no unticked rebase checkbox`);
       continue;
     }
-    await api.patch(`/repos/${repo}/pulls/${pr.number}`, { body });
+    await github.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { ...repo, pull_number: pr.number, body });
     log(`#${pr.number}: ticked the rebase checkbox`);
     ticked.push(pr.number);
   }
   return ticked;
+}
+
+export async function run({ github, core, inputs }) {
+  const [owner, repo] = inputs.repository.split("/");
+  const ticked = await resume({
+    github,
+    repo: { owner, repo },
+    before: inputs.before,
+    checkName: inputs["check-name"],
+    appId: Number(inputs["app-id"]),
+    depth: Number(inputs.depth),
+    prefix: inputs["branch-prefix"],
+    label: inputs.label,
+    log: core.info,
+  });
+  core.setOutput("ticked", JSON.stringify(ticked));
 }

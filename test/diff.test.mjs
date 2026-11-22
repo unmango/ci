@@ -1,9 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { installable, parseJobs, plan, run } from "../.github/actions/drv-diff/diff.mjs";
+import { evalArgs, installable, parseJobs, plan, run } from "../.github/actions/drv-diff/diff.mjs";
 
 /** One nix-eval-jobs line. */
 const job = (type, system, name, drv, extra = {}) => ({
@@ -87,10 +84,13 @@ test("a head eval error is reported unless base failed the same way", () => {
   assert.deepEqual(p.matrix, []);
 });
 
-test("errors differing only in store paths count as the same", () => {
-  const at = (h) => `error: nope\n at /nix/store/${h.repeat(32)}-source/flake.nix:4:74`;
-  const p = plan([broken("packages", "x86_64-linux", "d", at("a"))], [broken("packages", "x86_64-linux", "d", at("b"))]);
+test("errors differing only in their trace count as the same", () => {
+  const at = (h, line) =>
+    `error:\n  … while calling the 'throw' builtin\n  at /nix/store/${h.repeat(32)}-source/flake.nix:4:74:\n  3| ${line}\n\n  \x1b[31;1merror:\x1b[0m nope /nix/store/${h.repeat(32)}-x`;
+  const p = plan([broken("packages", "x86_64-linux", "d", at("a", "one"))], [broken("packages", "x86_64-linux", "d", at("b", "two"))]);
   assert.deepEqual(p.errors, []);
+  const q = plan([broken("packages", "x86_64-linux", "d", "error: new")], [broken("packages", "x86_64-linux", "d", "error: old")]);
+  assert.equal(q.errors.length, 1);
 });
 
 test("with no base every eval error is reported", () => {
@@ -106,48 +106,88 @@ test("a system with no hosted runner is an error", () => {
 function fakeCore() {
   const outputs = {};
   const failed = [];
+  const warnings = [];
   let summary = "";
   return {
     outputs,
     failed,
+    warnings,
     get summary() {
       return { addRaw: (t) => ((summary += t), { write: async () => {} }) };
     },
     text: () => summary,
     info() {},
-    warning() {},
+    warning: (m) => warnings.push(m),
     setOutput: (k, v) => (outputs[k] = v),
     setFailed: (m) => failed.push(m),
   };
 }
 
-async function files(head, baseText) {
-  const dir = await mkdtemp(join(tmpdir(), "drv-diff-"));
-  await writeFile(join(dir, "head.jsonl"), head);
-  if (baseText !== undefined) await writeFile(join(dir, "base.jsonl"), baseText);
-  return { head: join(dir, "head.jsonl"), base: baseText === undefined ? "" : join(dir, "base.jsonl") };
+const inputs = { head: "/w/head", base: "/w/base", systems: "x86_64-linux", full: "false", "action-path": "/a/drv-diff" };
+
+/** nix-eval-jobs output, or a failure, per checkout. */
+function fakeExec(out) {
+  const calls = [];
+  return {
+    calls,
+    async exec() {
+      throw new Error("unexpected exec");
+    },
+    async getExecOutput(cmd, args, opts) {
+      assert.equal(cmd, "nix");
+      assert.deepEqual(opts, { silent: true, ignoreReturnCode: true });
+      calls.push(args);
+      const flake = args[args.indexOf("flake") + 1].replace("git+file://", "");
+      const stdout = out[flake];
+      return stdout === undefined ? { exitCode: 1, stdout: "", stderr: "eval broke" } : { exitCode: 0, stdout, stderr: "" };
+    },
+  };
 }
+
+test("evalArgs runs this repo's nix-eval-jobs over jobs.nix", () => {
+  const args = evalArgs({ actionPath: "/a/drv-diff", flake: "/w/head", systems: "x86_64-linux aarch64-darwin", full: true });
+  assert.deepEqual(args.slice(0, 5), ["run", "--inputs-from", "path:/a/drv-diff/../../..", "nixpkgs#nix-eval-jobs", "--"]);
+  assert.equal(args.at(-1), "/a/drv-diff/jobs.nix");
+  assert.deepEqual(args.slice(args.indexOf("flake") - 1, args.indexOf("flake") + 2), ["--argstr", "flake", "git+file:///w/head"]);
+  assert.deepEqual(args.slice(args.indexOf("full") - 1, args.indexOf("full") + 2), ["--arg", "full", "true"]);
+  assert.equal(args[args.indexOf("systems") + 1], "x86_64-linux aarch64-darwin");
+});
 
 test("run sets the matrix and summarizes what it builds", async () => {
   const core = fakeCore();
-  const head = jsonl(...base.slice(1), job("packages", "x86_64-linux", "a", "2"));
-  await run({ core, read: (p) => readFile(p, "utf8"), inputs: await files(head, jsonl(...base)) });
+  const exec = fakeExec({ "/w/head": jsonl(...base.slice(1), job("packages", "x86_64-linux", "a", "2")), "/w/base": jsonl(...base) });
+  await run({ exec, core, inputs });
   assert.deepEqual(JSON.parse(core.outputs.matrix), [
     { system: "x86_64-linux", runner: "ubuntu-latest", packages: [".#packages.x86_64-linux.a"], checks: [] },
   ]);
   assert.match(core.text(), /packages\.x86_64-linux\.a/);
   assert.deepEqual(core.failed, []);
+  assert.equal(exec.calls.length, 2);
 });
 
 test("run with no base builds everything", async () => {
   const core = fakeCore();
-  await run({ core, read: (p) => readFile(p, "utf8"), inputs: await files(jsonl(...base)) });
+  const exec = fakeExec({ "/w/head": jsonl(...base) });
+  await run({ exec, core, inputs: { ...inputs, base: "" } });
   assert.equal(JSON.parse(core.outputs.matrix).length, 2);
+  assert.equal(exec.calls.length, 1);
+});
+
+test("run builds everything when the base fails to evaluate", async () => {
+  const core = fakeCore();
+  await run({ exec: fakeExec({ "/w/head": jsonl(...base) }), core, inputs });
+  assert.equal(JSON.parse(core.outputs.matrix).length, 2);
+  assert.match(core.warnings[0], /eval broke/);
+  assert.deepEqual(core.failed, []);
+});
+
+test("run throws when the head fails to evaluate", async () => {
+  await assert.rejects(run({ exec: fakeExec({}), core: fakeCore(), inputs }), /eval broke/);
 });
 
 test("run says when nothing changed", async () => {
   const core = fakeCore();
-  await run({ core, read: (p) => readFile(p, "utf8"), inputs: await files(jsonl(...base), jsonl(...base)) });
+  await run({ exec: fakeExec({ "/w/head": jsonl(...base), "/w/base": jsonl(...base) }), core, inputs });
   assert.equal(core.outputs.matrix, "[]");
   assert.match(core.text(), /Nothing to build/);
 });
@@ -155,7 +195,7 @@ test("run says when nothing changed", async () => {
 test("run fails on eval errors but still sets the matrix", async () => {
   const core = fakeCore();
   const head = jsonl(job("packages", "x86_64-linux", "a", "2"), broken("packages", "x86_64-linux", "c", "boom"));
-  await run({ core, read: (p) => readFile(p, "utf8"), inputs: await files(head, jsonl(...base)) });
+  await run({ exec: fakeExec({ "/w/head": head, "/w/base": jsonl(...base) }), core, inputs });
   assert.equal(JSON.parse(core.outputs.matrix).length, 1);
   assert.equal(core.failed.length, 1);
   assert.match(core.text(), /boom/);

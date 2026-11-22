@@ -1,4 +1,4 @@
-// Types only: the parts of github-script's injected client and core that the actions use.
+// Types only: the parts of github-script's injected client, core and exec that the actions use.
 
 /**
  * @typedef {object} Octokit
@@ -14,6 +14,12 @@
  * @property {(name: string, value: unknown) => void} setOutput
  * @property {(message: string) => void} setFailed
  * @property {{ addRaw: (text: string) => { write: () => Promise<unknown> } }} summary
+ */
+
+/**
+ * @typedef {object} Exec
+ * @property {(cmd: string, args?: string[], opts?: { ignoreReturnCode?: boolean }) => Promise<number>} exec
+ * @property {(cmd: string, args?: string[], opts?: { ignoreReturnCode?: boolean, silent?: boolean }) => Promise<{ exitCode: number, stdout: string, stderr: string }>} getExecOutput
  */
 
 /** @typedef {{ owner: string, repo: string }} Repo */

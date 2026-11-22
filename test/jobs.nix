@@ -86,7 +86,7 @@ let
       expr =
         (select withLists {
           inherit systems;
-          full = "true";
+          full = true;
         }).packages;
       expected = {
         x86_64-linux = [

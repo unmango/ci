@@ -1,11 +1,10 @@
-# The checks and packages a collection build covers, for nix-eval-jobs.
 {
   flake ? null,
   outputs ? builtins.getFlake flake,
   # Space-separated.
   systems,
-  # "true" adds flakeModules.ci's nightly list.
-  full ? "false",
+  # Adds flakeModules.ci's nightly list.
+  full ? false,
 }:
 let
   inherit (builtins)
@@ -44,7 +43,7 @@ let
         known = set (names outputs type);
         kept = set (
           names hci.onPush.default.outputs type
-          ++ (if full == "true" then names (hci.onSchedule.nightly.outputs or { }) type else [ ])
+          ++ (if full then names (hci.onSchedule.nightly.outputs or { }) type else [ ])
         );
       in
       # A name missing on the reference system is on no list.

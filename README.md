@@ -62,7 +62,7 @@ Every hosted job reads Cachix; only a push to `main` gets the token.
 - on a fork PR, or with `linux: true`, the hosted `linux` job builds instead and nothing waits for Hercules.
 
 `renovate-resume` runs on a push to `main` once `gate` passes, and its failure never fails the call.
-When the previous completed `required` run on `main` failed or timed out, it ticks the rebase checkbox on every open `renovate/` PR whose latest `required` run failed and that isn't labelled `renovate:needs-human`.
+When the previous finished `required` run on `main`, skipping cancelled and skipped runs, failed or timed out, it ticks the rebase checkbox on every open `renovate/` PR whose latest `required` run failed and that isn't labelled `renovate:needs-human`.
 
 ## `collection-ci.yml`
 
@@ -93,7 +93,7 @@ jobs:
 
   required:
     needs: [collection]
-    if: always()
+    if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -109,12 +109,15 @@ jobs:
 
 `plan` evaluates `checks` and `packages` for each system with `nix-eval-jobs`, at the head and at the base: the PR's base, or the commit `main` pointed at before the push.
 `build` runs once per system with an output whose `.drv` path differs, so a `flake.lock` bump rebuilds everything and a docs edit builds nothing, and `required` passes.
+A check whose source is the whole tree, such as treefmt's, is the exception: any edit rebuilds it.
+An aggregate like a `linkFarm` of every package changes with any package, so building it realises the whole set; put it on the exclude list.
 A head output that fails to evaluate fails `plan` unless it failed the same way on the base; what did evaluate still builds.
+When the base can't be checked out or evaluated, everything builds.
 
 A scheduled or manual run has no base and builds every output, which keeps the cache warm and catches what the diff misses.
-`ci-health.yml` reports its result; it fails the run's `required`, but the health state only reads pushes.
+`required` skips a scheduled run, so it gates nothing and `renovate-resume` never reads it; `ci-health.yml` reports the run's result instead.
 
-Every job reads Cachix `unstoppablemango`; on `main`, outside PRs, the packages a build makes are pushed to it, and checks never are.
+Every job reads Cachix `unstoppablemango`; on `main`, outside PRs, what a package build makes is pushed to it, and checks never are.
 
 Where the repo imports `flakeModules.ci` from [UnstoppableMango/nix](https://github.com/UnstoppableMango/nix), its exclude lists are never built and its nightly lists only in a full build.
 They are read back from `herculesCI`, against the first of its `ciSystems`.
@@ -175,7 +178,7 @@ Cancelled runs count toward neither the state nor the percentiles, and `unknown`
 
 Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
 The workflows use the actions through `$/`, so they come from the same commit.
-`drv-diff` also runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`; `test/jobs.nix` tests it as `checks.jobs`.
+`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, and `nix-build` runs `nix build`, both through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.

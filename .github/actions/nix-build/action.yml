@@ -1,0 +1,25 @@
+name: Nix build
+description: Build a matrix entry's packages and checks, pushing the packages to Cachix when CACHIX_AUTH_TOKEN is set.
+
+inputs:
+  packages:
+    description: JSON array of installables.
+    default: "[]"
+  checks:
+    description: JSON array of installables, never pushed.
+    default: "[]"
+  cache:
+    description: Cachix cache to push to.
+    default: unstoppablemango
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUTS: ${{ toJSON(inputs) }}
+      with:
+        script: |
+          const { run } = await import(`${process.env.ACTION_PATH}/build.mjs`);
+          await run({ exec, core, inputs: JSON.parse(process.env.INPUTS), push: !!process.env.CACHIX_AUTH_TOKEN });

@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   nix:
+    if: github.event_name != 'schedule'
     uses: ./.github/workflows/nix-ci.yml
     permissions:
       checks: read
@@ -55,7 +56,7 @@ jobs:
 
   # Its own context: on Hercules's, the real status would pass the gate.
   spoofed-status:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -93,7 +94,8 @@ jobs:
 
   required:
     needs: [nix, hosted, collection, spoofed-status]
-    if: always()
+    # The weekly build reports through ci-health, not the gate.
+    if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions: {}
     steps:

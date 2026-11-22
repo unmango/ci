@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      FULL: ${{ inputs.full || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     outputs:
       matrix: ${{ steps.diff.outputs.matrix }}
     steps:
@@ -33,11 +35,11 @@ jobs:
         uses: $/.github/actions/drv-diff
         with:
           base: >-
-            ${{ !(inputs.full || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+            ${{ env.FULL != 'true'
             && (github.event.pull_request.base.sha || (github.event_name == 'push' && !github.event.created && github.event.before))
             || '' }}
           systems: ${{ inputs.systems }}
-          full: ${{ inputs.full || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+          full: ${{ env.FULL }}
 
   build:
     needs: [plan]
@@ -63,25 +65,13 @@ jobs:
             min-free = 3221225472
             max-free = 10737418240
 
-      - name: Build packages
+      # Only packages are pushed, so setup-nix gets no token.
+      - uses: $/.github/actions/nix-build
         env:
-          INSTALLABLES: ${{ toJSON(matrix.packages) }}
           CACHIX_AUTH_TOKEN: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.CACHIX_AUTH_TOKEN || '' }}
-        run: |
-          mapfile -t attrs < <(jq -r '.[]' <<<"$INSTALLABLES")
-          [ "${#attrs[@]}" -gt 0 ] || exit 0
-          build=(nix build --keep-going --no-link "${attrs[@]}")
-          if [ -n "$CACHIX_AUTH_TOKEN" ]; then build=(cachix watch-exec unstoppablemango -- "${build[@]}"); fi
-          "${build[@]}"
-
-      - name: Build checks
-        if: ${{ !cancelled() }}
-        env:
-          INSTALLABLES: ${{ toJSON(matrix.checks) }}
-        run: |
-          mapfile -t attrs < <(jq -r '.[]' <<<"$INSTALLABLES")
-          [ "${#attrs[@]}" -gt 0 ] || exit 0
-          nix build --keep-going --no-link "${attrs[@]}"
+        with:
+          packages: ${{ toJSON(matrix.packages) }}
+          checks: ${{ toJSON(matrix.checks) }}
 
   renovate-resume:
     needs: [build]

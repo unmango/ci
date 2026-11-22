@@ -1,4 +1,4 @@
-/** @import { Core, Inputs } from "../types.mjs" */
+/** @import { Core, Exec, Inputs } from "../types.mjs" */
 
 /**
  * One line of nix-eval-jobs output.
@@ -26,8 +26,17 @@ export const RUNNERS = {
   "aarch64-darwin": "macos-latest",
 };
 
-/** @type {(error: string | undefined) => string | undefined} */
-const unpinned = (error) => error?.replace(/\/nix\/store\/[0-9a-z]{32}-/g, "/nix/store/");
+/**
+ * The message after the trace, which quotes source lines any nearby edit changes.
+ * @type {(error: string | undefined) => string | undefined}
+ */
+const cause = (error) => {
+  const plain = error?.replace(/\x1b\[[0-9;]*m/g, "");
+  return plain
+    ?.slice(plain.lastIndexOf("error:"))
+    .trim()
+    .replace(/\/nix\/store\/[0-9a-z]{32}-/g, "/nix/store/");
+};
 
 /**
  * @param {string} text
@@ -58,8 +67,8 @@ export function plan(head, base) {
   for (const job of head) {
     const prev = before.get(job.attr);
     if (job.error !== undefined) {
-      // Already broken on base, so not this change's doing. The source's store path changes with any edit.
-      if (unpinned(prev?.error) !== unpinned(job.error)) errors.push({ attr: job.attr, error: job.error });
+      // Already broken on base.
+      if (cause(prev?.error) !== cause(job.error)) errors.push({ attr: job.attr, error: job.error });
       continue;
     }
     if (prev?.drvPath === job.drvPath) continue;
@@ -70,13 +79,16 @@ export function plan(head, base) {
       errors.push({ attr: job.attr, error: `no hosted runner for ${system}` });
       continue;
     }
-    let build = builds.get(system);
-    if (!build) builds.set(system, (build = { system, runner, packages: [], checks: [] }));
+    const build = builds.get(system) ?? { system, runner, packages: [], checks: [] };
+    builds.set(system, build);
     (type === "packages" ? build.packages : build.checks).push(installable(job.attrPath));
   }
 
   const matrix = [...builds.values()].sort((a, b) => a.system.localeCompare(b.system));
-  for (const b of matrix) b.packages.sort(), b.checks.sort();
+  for (const b of matrix) {
+    b.packages.sort();
+    b.checks.sort();
+  }
   return { matrix, errors };
 }
 
@@ -99,14 +111,64 @@ export function render({ matrix, errors }, full) {
 }
 
 /**
+ * nix-eval-jobs from this repo's lock, so base and head agree on it.
  * @param {object} opts
- * @param {Core} opts.core
- * @param {Inputs} opts.inputs `head` and optional `base`: paths to nix-eval-jobs output.
- * @param {(path: string) => Promise<string>} opts.read
+ * @param {string} opts.actionPath
+ * @param {string} opts.flake Checkout to evaluate.
+ * @param {string} opts.systems
+ * @param {boolean} opts.full
+ * @returns {string[]} Arguments to `nix`.
  */
-export async function run({ core, inputs, read }) {
-  const head = parseJobs(await read(inputs.head));
-  const base = inputs.base ? parseJobs(await read(inputs.base)) : null;
+export const evalArgs = ({ actionPath, flake, systems, full }) => [
+  "run",
+  "--inputs-from",
+  `path:${actionPath}/../../..`,
+  "nixpkgs#nix-eval-jobs",
+  "--",
+  "--impure",
+  "--force-recurse",
+  "--no-instantiate",
+  "--workers",
+  "4",
+  "--max-memory-size",
+  "3072",
+  "--argstr",
+  "flake",
+  `git+file://${flake}`,
+  "--argstr",
+  "systems",
+  systems,
+  "--arg",
+  "full",
+  String(full),
+  `${actionPath}/jobs.nix`,
+];
+
+/**
+ * @param {object} opts
+ * @param {Exec} opts.exec
+ * @param {Core} opts.core
+ * @param {Inputs} opts.inputs `head` and `base` checkouts, `base` empty for none.
+ */
+export async function run({ exec, core, inputs }) {
+  const full = inputs.full === "true";
+  /** @type {(flake: string) => Promise<Job[]>} */
+  const evaluate = async (flake) => {
+    const args = evalArgs({ actionPath: inputs["action-path"], flake, systems: inputs.systems, full });
+    const { exitCode, stdout, stderr } = await exec.getExecOutput("nix", args, { silent: true, ignoreReturnCode: true });
+    if (exitCode !== 0) throw new Error(`nix-eval-jobs failed on ${flake}:\n${stderr}`);
+    return parseJobs(stdout);
+  };
+
+  const head = await evaluate(inputs.head);
+  let base = null;
+  if (inputs.base) {
+    try {
+      base = await evaluate(inputs.base);
+    } catch (/** @type {any} */ e) {
+      core.warning(`${e.message}\nBuilding every output.`);
+    }
+  }
   const result = plan(head, base);
   core.setOutput("matrix", JSON.stringify(result.matrix));
   await core.summary.addRaw(render(result, base === null)).write();

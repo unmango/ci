@@ -174,7 +174,7 @@ export async function collect({ github, repo, workflow, branch, since }) {
 }
 
 /**
- * A collection's weekly full build: reported, but not a gate.
+ * Reported, but never the state.
  * @param {object} opts
  * @param {Octokit} opts.github
  * @param {Repo} opts.repo

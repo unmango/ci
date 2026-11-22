@@ -126,11 +126,14 @@ test("resume skips a failing PR whose checkbox is already ticked", async () => {
   assert.deepEqual(await resume({ ...resumeOpts, github: api, before: "b" }), []);
 });
 
-test("a timed-out run counts as failed, a cancelled one doesn't", async () => {
+test("a timed-out run counts as failed; cancelled and skipped runs are passed over", async () => {
   const timedOut = [run(1, "completed", "timed_out", "2026-01-01T00:00:00Z")];
-  const cancelled = [run(1, "completed", "cancelled", "2026-01-01T00:00:00Z")];
+  const after = (conclusion) => [...red, run(2, "completed", conclusion, "2026-01-02T00:00:00Z")];
   assert.equal(await previousRequiredFailed({ ...base, github: fakeApi({ commits: ["b"], runs: { b: timedOut } }), before: "b" }), true);
-  assert.equal(await previousRequiredFailed({ ...base, github: fakeApi({ commits: ["b"], runs: { b: cancelled } }), before: "b" }), false);
+  assert.equal(await previousRequiredFailed({ ...base, github: fakeApi({ commits: ["b"], runs: { b: after("cancelled") } }), before: "b" }), true);
+  assert.equal(await previousRequiredFailed({ ...base, github: fakeApi({ commits: ["b"], runs: { b: after("skipped") } }), before: "b" }), true);
+  const onlySkipped = [run(1, "completed", "skipped", "2026-01-02T00:00:00Z")];
+  assert.equal(await previousRequiredFailed({ ...base, github: fakeApi({ commits: ["b", "c"], runs: { b: onlySkipped, c: green } }), before: "b" }), false);
 });
 
 test("run reads the action's inputs and sets ticked", async () => {

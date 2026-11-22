@@ -48,7 +48,7 @@ function fakeGitHub(repos, { issue = null, needsHuman = {} } = {}) {
 		},
 		async createIssue(title, body) {
 			calls.push(['createIssue', title, body]);
-			return { number: 9, nodeId: 'I_9' };
+			return { number: 9, nodeId: 'I_9', pinned: false };
 		},
 		async pinIssue(nodeId) {
 			calls.push(['pinIssue', nodeId]);
@@ -67,6 +67,8 @@ function fakeNtfy() {
 	return { pages, page: async msg => pages.push(msg) };
 }
 
+const pinned = { number: 3, nodeId: 'I_3', pinned: true };
+
 const opts = (github, ntfy, extra = {}) => ({ github, ntfy, now, runUrl: 'https://example.test/run', weekly: false, ...extra });
 
 test('creates and pins the issue when none exists', async () => {
@@ -79,13 +81,29 @@ test('creates and pins the issue when none exists', async () => {
 	assert.deepEqual(github.calls.find(c => c[0] === 'pinIssue'), ['pinIssue', 'I_9']);
 });
 
-test('rewrites the existing issue', async () => {
-	const github = fakeGitHub({ 'unmango/pkgs': [[1, 'success'], [24 * 8, 'success']] }, { issue: { number: 3 } });
+test('rewrites the existing pinned issue', async () => {
+	const github = fakeGitHub({ 'unmango/pkgs': [[1, 'success'], [24 * 8, 'success']] }, { issue: pinned });
 	await run(['unmango/pkgs'], opts(github, fakeNtfy()));
 	assert.equal(github.calls.find(c => c[0] === 'createIssue'), undefined);
+	assert.equal(github.calls.find(c => c[0] === 'pinIssue'), undefined);
 	const updated = github.calls.find(c => c[0] === 'updateIssue');
 	assert.equal(updated[1], 3);
 	assert.match(updated[2], /unmango\/pkgs/);
+});
+
+test('pins an existing issue that lost its pin', async () => {
+	const github = fakeGitHub({ 'unmango/pkgs': [[1, 'success'], [24 * 8, 'success']] }, { issue: { ...pinned, pinned: false } });
+	await run(['unmango/pkgs'], opts(github, fakeNtfy()));
+	assert.deepEqual(github.calls.find(c => c[0] === 'pinIssue'), ['pinIssue', 'I_3']);
+});
+
+test('a failed pin fails the run', async () => {
+	const github = fakeGitHub({ 'unmango/pkgs': [[1, 'success'], [24 * 8, 'success']] });
+	github.pinIssue = async () => {
+		throw new Error('forbidden');
+	};
+	const result = await run(['unmango/pkgs'], opts(github, fakeNtfy()));
+	assert.equal(result.failed, true);
 });
 
 test('stops fetching once older commits cannot change the result', async () => {
@@ -142,7 +160,7 @@ test('a failed page fails the run but still writes the issue', async () => {
 });
 
 test('weekly runs add the digest as a comment', async () => {
-	const github = fakeGitHub({ 'unmango/pkgs': [[1, 'success'], [24 * 8, 'success']] }, { issue: { number: 3 }, needsHuman: { 'unmango/pkgs': 2 } });
+	const github = fakeGitHub({ 'unmango/pkgs': [[1, 'success'], [24 * 8, 'success']] }, { issue: pinned, needsHuman: { 'unmango/pkgs': 2 } });
 	await run(['unmango/pkgs'], opts(github, fakeNtfy(), { weekly: true }));
 	const comment = github.calls.find(c => c[0] === 'comment');
 	assert.equal(comment[1], 3);
@@ -150,7 +168,7 @@ test('weekly runs add the digest as a comment', async () => {
 });
 
 test('daily runs add no comment', async () => {
-	const github = fakeGitHub({ 'unmango/pkgs': [[1, 'success'], [24 * 8, 'success']] }, { issue: { number: 3 } });
+	const github = fakeGitHub({ 'unmango/pkgs': [[1, 'success'], [24 * 8, 'success']] }, { issue: pinned });
 	await run(['unmango/pkgs'], opts(github, fakeNtfy()));
 	assert.equal(github.calls.find(c => c[0] === 'comment'), undefined);
 });

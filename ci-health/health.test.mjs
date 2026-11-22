@@ -1,15 +1,13 @@
-// Run with: node --test 'ci-health/*.test.mjs'
-
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
 	digest,
 	issueBody,
-	needsOlder,
+	olderCommitsMatter,
 	pageMessage,
 	percentile,
-	requiredRun,
+	requiredGate,
 	summarize,
 	shouldPage,
 } from './health.mjs';
@@ -83,12 +81,12 @@ test('shouldPage after more than 24 hours red', () => {
 	assert.equal(shouldPage({ state: 'green', redSince: null }, now), false);
 });
 
-test('needsOlder until the window is covered and the streak is resolved', () => {
-	assert.equal(needsOlder([], now), true);
-	assert.equal(needsOlder([commit(1, 'success')], now), true);
-	assert.equal(needsOlder([commit(1, 'success'), commit(24 * 8, 'success')], now), false);
-	assert.equal(needsOlder([commit(1, 'failure'), commit(24 * 8, 'failure')], now), true);
-	assert.equal(needsOlder([commit(1, 'failure'), commit(24 * 8, 'failure'), commit(24 * 9, 'success')], now), false);
+test('olderCommitsMatter until the window is covered and the streak is resolved', () => {
+	assert.equal(olderCommitsMatter([], now), true);
+	assert.equal(olderCommitsMatter([commit(1, 'success')], now), true);
+	assert.equal(olderCommitsMatter([commit(1, 'success'), commit(24 * 8, 'success')], now), false);
+	assert.equal(olderCommitsMatter([commit(1, 'failure'), commit(24 * 8, 'failure')], now), true);
+	assert.equal(olderCommitsMatter([commit(1, 'failure'), commit(24 * 8, 'failure'), commit(24 * 9, 'success')], now), false);
 });
 
 const report = (repo, overrides = {}) => ({
@@ -157,17 +155,23 @@ test('pageMessage names the repo and how long', () => {
 	assert.match(msg.click, /^https:\/\/github\.com\/UnstoppableMango\/tdl\/actions/);
 });
 
-test('requiredRun times the gate from the first job of its workflow run', () => {
-	const runs = [
-		{ name: 'build', check_suite: { id: 1 }, status: 'completed', conclusion: 'success', started_at: '2026-11-22T10:00:00Z', completed_at: '2026-11-22T10:04:00Z' },
-		{ name: 'other', check_suite: { id: 2 }, status: 'completed', conclusion: 'success', started_at: '2026-11-22T09:00:00Z', completed_at: '2026-11-22T09:01:00Z' },
-		{ name: 'required', check_suite: { id: 1 }, status: 'completed', conclusion: 'failure', started_at: '2026-11-22T10:04:10Z', completed_at: '2026-11-22T10:04:12Z' },
-	];
-	assert.deepEqual(requiredRun(runs), {
+test('requiredGate finds the gate and its workflow run', () => {
+	const gate = (name, url) => ({
+		name,
 		status: 'completed',
 		conclusion: 'failure',
-		startedAt: '2026-11-22T10:00:00Z',
-		completedAt: '2026-11-22T10:04:12Z',
+		started_at: '2026-11-22T10:04:10Z',
+		completed_at: '2026-11-22T10:04:12Z',
+		details_url: url,
 	});
-	assert.equal(requiredRun(runs.slice(0, 2)), null);
+	const build = gate('build', 'https://github.com/o/r/actions/runs/1/job/2');
+	assert.deepEqual(requiredGate([build, gate('required', 'https://github.com/o/r/actions/runs/123/job/456')]), {
+		status: 'completed',
+		conclusion: 'failure',
+		completedAt: '2026-11-22T10:04:12Z',
+		workflowRun: 123,
+	});
+	assert.equal(requiredGate([gate('ci / required', 'https://github.com/o/r/actions/runs/7/job/8')]).workflowRun, 7);
+	assert.equal(requiredGate([build]), null);
+	assert.equal(requiredGate([gate('not-required', null)]), null);
 });

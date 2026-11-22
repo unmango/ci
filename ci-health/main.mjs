@@ -1,7 +1,7 @@
-import { MARKER, NEEDS_HUMAN, requiredRun } from './health.mjs';
-import { run, TITLE } from './run.mjs';
+import { MARKER, NEEDS_HUMAN, requiredGate, TITLE } from './health.mjs';
+import { run } from './run.mjs';
 
-// The GitHub Actions app, which posts every `required` check.
+// GitHub Actions' app ID.
 const ACTIONS_APP = 15368;
 
 const env = name => {
@@ -10,9 +10,14 @@ const env = name => {
 	return value;
 };
 
+const repos = env('REPOS').split(/\s+/).filter(Boolean);
 const issueRepo = env('ISSUE_REPO');
 const tokens = { unmango: env('TOKEN_UNMANGO'), unstoppablemango: env('TOKEN_UNSTOPPABLEMANGO') };
 const issueToken = env('ISSUE_TOKEN');
+const topic = env('NTFY_TOPIC');
+const runUrl = env('RUN_URL');
+const weekly = process.env.WEEKLY === 'true';
+
 const tokenFor = repo => tokens[repo.split('/')[0].toLowerCase()];
 
 async function api(token, path, { method = 'GET', body } = {}) {
@@ -30,6 +35,14 @@ async function api(token, path, { method = 'GET', body } = {}) {
 	return res.json();
 }
 
+async function graphql(query, variables) {
+	const res = await api(issueToken, '/graphql', { method: 'POST', body: { query, variables } });
+	if (res.errors) throw new Error(res.errors.map(e => e.message).join('; '));
+	return res.data;
+}
+
+const isHealthIssue = i => i.title === TITLE && i.body?.startsWith(MARKER);
+
 const github = {
 	async commits(repo, page) {
 		const commits = await api(tokenFor(repo), `/repos/${repo}/commits?sha=main&per_page=100&page=${page}`);
@@ -40,7 +53,11 @@ const github = {
 			tokenFor(repo),
 			`/repos/${repo}/commits/${sha}/check-runs?filter=latest&app_id=${ACTIONS_APP}&per_page=100`,
 		);
-		return requiredRun(check_runs);
+		const gate = requiredGate(check_runs);
+		if (!gate?.workflowRun) return null;
+		// The gate only aggregates. Timing from the latest attempt's start leaves out the gap before a rerun.
+		const { run_started_at } = await api(tokenFor(repo), `/repos/${repo}/actions/runs/${gate.workflowRun}`);
+		return { ...gate, startedAt: run_started_at };
 	},
 	async needsHuman(repo) {
 		const label = encodeURIComponent(NEEDS_HUMAN);
@@ -48,20 +65,26 @@ const github = {
 		return issues.filter(i => i.pull_request).length;
 	},
 	async findIssue() {
-		const q = encodeURIComponent(`repo:${issueRepo} is:issue is:open in:title "${TITLE}"`);
-		const { items } = await api(issueToken, `/search/issues?q=${q}`);
-		return items.find(i => i.title === TITLE && i.body?.startsWith(MARKER)) ?? null;
+		const [owner, name] = issueRepo.split('/');
+		const { repository } = await graphql(
+			'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { pinnedIssues(first: 3) { nodes { issue { number id title body } } } } }',
+			{ owner, name },
+		);
+		const pinned = repository.pinnedIssues.nodes.map(n => n.issue).find(isHealthIssue);
+		if (pinned) return { number: pinned.number, nodeId: pinned.id, pinned: true };
+		for (let page = 1; ; page++) {
+			const issues = await api(issueToken, `/repos/${issueRepo}/issues?state=open&per_page=100&page=${page}`);
+			const found = issues.find(isHealthIssue);
+			if (found) return { number: found.number, nodeId: found.node_id, pinned: false };
+			if (issues.length < 100) return null;
+		}
 	},
 	async createIssue(title, body) {
 		const issue = await api(issueToken, `/repos/${issueRepo}/issues`, { method: 'POST', body: { title, body } });
-		return { number: issue.number, nodeId: issue.node_id };
+		return { number: issue.number, nodeId: issue.node_id, pinned: false };
 	},
 	async pinIssue(nodeId) {
-		const res = await api(issueToken, '/graphql', {
-			method: 'POST',
-			body: { query: 'mutation($id: ID!) { pinIssue(input: { issueId: $id }) { issue { number } } }', variables: { id: nodeId } },
-		});
-		if (res.errors) throw new Error(res.errors.map(e => e.message).join('; '));
+		await graphql('mutation($id: ID!) { pinIssue(input: { issueId: $id }) { issue { number } } }', { id: nodeId });
 	},
 	async updateIssue(number, body) {
 		await api(issueToken, `/repos/${issueRepo}/issues/${number}`, { method: 'PATCH', body: { body } });
@@ -71,7 +94,6 @@ const github = {
 	},
 };
 
-const topic = env('NTFY_TOPIC');
 const ntfy = {
 	async page({ title, body, click }) {
 		const res = await fetch(`https://ntfy.sh/${topic}`, {
@@ -83,11 +105,5 @@ const ntfy = {
 	},
 };
 
-const { failed } = await run(env('REPOS').split(/\s+/).filter(Boolean), {
-	github,
-	ntfy,
-	now: new Date(),
-	runUrl: env('RUN_URL'),
-	weekly: process.env.WEEKLY === 'true',
-});
+const { failed } = await run(repos, { github, ntfy, now: new Date(), runUrl, weekly });
 if (failed) process.exitCode = 1;

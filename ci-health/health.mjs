@@ -8,6 +8,7 @@ const GREEN = new Set(['success', 'neutral']);
 
 export const NEEDS_HUMAN = 'renovate:needs-human';
 export const MARKER = '<!-- ci-health -->';
+export const TITLE = 'CI health';
 
 export function percentile(values, p) {
 	if (values.length === 0) return null;
@@ -49,8 +50,7 @@ export function summarize(commits, now) {
 	};
 }
 
-// Whether `summarize` could change if older commits were fetched.
-export function needsOlder(commits, now) {
+export function olderCommitsMatter(commits, now) {
 	const oldest = commits.at(-1);
 	if (!oldest || now - new Date(oldest.date) <= WINDOW) return true;
 	const { state, resolved } = streak(commits);
@@ -141,13 +141,14 @@ export function pageMessage(r, now) {
 	};
 }
 
-// The gate only aggregates, so it is timed from the first job of its workflow run.
-export function requiredRun(checkRuns) {
-	const gate = checkRuns.find(r => r.name === 'required');
+// A gate called from a reusable workflow is named `<caller job> / required`.
+export function requiredGate(checkRuns) {
+	const gate = checkRuns.find(r => r.name === 'required' || r.name.endsWith(' / required'));
 	if (!gate) return null;
-	const starts = checkRuns
-		.filter(r => r.check_suite?.id === gate.check_suite?.id && r.started_at)
-		.map(r => r.started_at)
-		.sort();
-	return { status: gate.status, conclusion: gate.conclusion, startedAt: starts[0] ?? gate.started_at, completedAt: gate.completed_at };
+	return {
+		status: gate.status,
+		conclusion: gate.conclusion,
+		completedAt: gate.completed_at,
+		workflowRun: Number(gate.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1]) || null,
+	};
 }

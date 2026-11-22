@@ -10,6 +10,9 @@ on:
         description: Also post the weekly digest
         type: boolean
         default: false
+      repos:
+        description: Watch these repositories instead, space-separated
+        type: string
 
 permissions: {}
 
@@ -19,6 +22,20 @@ jobs:
   health:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      NIX_REPOS: |
+        UnstoppableMango/control-plane
+        UnstoppableMango/nix
+        UnstoppableMango/nixos
+        UnstoppableMango/renovate-config
+        UnstoppableMango/tdl
+        UnstoppableMango/the-cluster
+        UnstoppableMango/vcs
+        unmango/charts
+        unmango/kubepkgs
+        unmango/pkgs
+        unmango/pulumipkgs
+        unmango/scm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,9 +51,10 @@ jobs:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: unmango
+          permission-actions: read
+          permission-checks: read
           permission-contents: read
           permission-issues: read
-          permission-pull-requests: read
 
       - id: unstoppablemango
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -44,9 +62,10 @@ jobs:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: UnstoppableMango
+          permission-actions: read
+          permission-checks: read
           permission-contents: read
           permission-issues: read
-          permission-pull-requests: read
 
       - id: issue
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -59,24 +78,11 @@ jobs:
 
       - run: node ci-health/main.mjs
         env:
-          REPOS: |
-            UnstoppableMango/control-plane
-            UnstoppableMango/nix
-            UnstoppableMango/nixos
-            UnstoppableMango/renovate-config
-            UnstoppableMango/tdl
-            UnstoppableMango/the-cluster
-            UnstoppableMango/vcs
-            unmango/charts
-            unmango/kubepkgs
-            unmango/pkgs
-            unmango/pulumipkgs
-            unmango/scm
+          REPOS: ${{ inputs.repos || env.NIX_REPOS }}
           ISSUE_REPO: UnstoppableMango/nixos
           TOKEN_UNMANGO: ${{ steps.unmango.outputs.token }}
           TOKEN_UNSTOPPABLEMANGO: ${{ steps.unstoppablemango.outputs.token }}
           ISSUE_TOKEN: ${{ steps.issue.outputs.token }}
           NTFY_TOPIC: ${{ secrets.CI_HEALTH_NTFY_TOPIC }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          # Monday's run carries the digest.
           WEEKLY: ${{ inputs.weekly || (github.event_name == 'schedule' && github.event.schedule == '23 13 * * 1') }}

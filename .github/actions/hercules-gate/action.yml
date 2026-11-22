@@ -46,5 +46,5 @@ runs:
       with:
         github-token: ${{ inputs.token }}
         script: |
-          const { run } = await import(`${process.env.ACTION_PATH}/../../../src/gate.mjs`);
+          const { run } = await import(`${process.env.ACTION_PATH}/gate.mjs`);
           await run({ github, core, inputs: JSON.parse(process.env.INPUTS) });

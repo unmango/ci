@@ -43,5 +43,5 @@ runs:
       with:
         github-token: ${{ inputs.token }}
         script: |
-          const { run } = await import(`${process.env.ACTION_PATH}/../../../src/resume.mjs`);
+          const { run } = await import(`${process.env.ACTION_PATH}/resume.mjs`);
           await run({ github, core, inputs: JSON.parse(process.env.INPUTS) });

@@ -1,4 +1,4 @@
-/** @import { Core, Inputs, Octokit, Repo } from "./types.mjs" */
+/** @import { Core, Inputs, Octokit, Repo } from "../types.mjs" */
 
 /**
  * @typedef {object} Status

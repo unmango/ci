@@ -66,8 +66,8 @@ When the previous completed `required` run on `main` failed or timed out, it tic
 
 ## Development
 
-The workflow's logic lives in `src/`, run by the two composite actions under `.github/actions/` through `actions/github-script`, which supplies the Octokit client and `core`.
+Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
 `nix-ci.yml` uses the actions through `$/`, so they come from the same commit.
-`src/` is typed with JSDoc and checked by `tsc -p jsconfig.json`.
+The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.

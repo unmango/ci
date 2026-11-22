@@ -36,7 +36,6 @@
                   root = ./.;
                   fileset = lib.fileset.unions [
                     ./package.json
-                    ./src
                     ./test
                     ./.github/actions
                   ];
@@ -56,7 +55,7 @@
                   root = ./.;
                   fileset = lib.fileset.unions [
                     ./jsconfig.json
-                    ./src
+                    ./.github/actions
                   ];
                 };
                 nativeBuildInputs = [ pkgs.typescript ];

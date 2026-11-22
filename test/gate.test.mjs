@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluate, resolveAppLogin, run, waitFor } from "../src/gate.mjs";
+import { evaluate, resolveAppLogin, run, waitFor } from "../.github/actions/hercules-gate/gate.mjs";
 
 const context = "ci/hercules/onPush/default";
 const login = "hercules-ci[bot]";

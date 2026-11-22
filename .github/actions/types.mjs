@@ -1,4 +1,4 @@
-// Types only: the parts of github-script's injected client and core that src/ uses.
+// Types only: the parts of github-script's injected client and core that the actions use.
 
 /**
  * @typedef {object} Octokit

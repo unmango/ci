@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tickRebase, isCandidate, latestRun, previousRequiredFailed, resume, run as runResume } from "../src/resume.mjs";
+import { tickRebase, isCandidate, latestRun, previousRequiredFailed, resume, run as runResume } from "../.github/actions/renovate-resume/resume.mjs";
 
 const body = "Some text\n\n---\n\n - [ ] <!-- rebase-check -->If you want to rebase/retry this PR, check this box\n";
 

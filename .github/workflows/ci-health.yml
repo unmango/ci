@@ -35,14 +35,22 @@ jobs:
 
           runs() {
             gh api "$@" "repos/$GH_REPO/actions/workflows/$wf/runs?branch=$branch&event=push&$query" \
-              --jq '.workflow_runs[] | {id, created_at, run_started_at, html_url}' | jq -c .
+              --jq '.workflow_runs[] | {id, created_at, run_started_at, run_attempt, html_url}' | jq -c .
           }
 
           gate() {
             while read -r run; do
-              gh api --paginate "repos/$GH_REPO/actions/runs/$(jq -r .id <<<"$run")/jobs?per_page=100" \
-                --jq '.jobs[] | select(.name == env.CHECK_NAME) | {conclusion, completed_at}' |
-                jq -sc --argjson run "$run" '$run + (first // {})'
+              id=$(jq -r .id <<<"$run")
+              job=$(gh api --paginate "repos/$GH_REPO/actions/runs/$id/jobs?per_page=100" \
+                --jq '.jobs[] | select(.name == env.CHECK_NAME) | {conclusion, completed_at, run_attempt}' |
+                jq -sc 'first // {}')
+              attempt=$(jq -r --argjson run "$run" '.run_attempt // $run.run_attempt' <<<"$job")
+              # A partial re-run keeps the job from an earlier attempt, which started at another time.
+              if [ "$attempt" != "$(jq -r .run_attempt <<<"$run")" ]; then
+                run=$(gh api "repos/$GH_REPO/actions/runs/$id/attempts/$attempt" --jq .run_started_at |
+                  jq -Rc --argjson run "$run" '$run + {run_started_at: .}')
+              fi
+              jq -c --argjson run "$run" '$run + del(.run_attempt)' <<<"$job"
             done
           }
 

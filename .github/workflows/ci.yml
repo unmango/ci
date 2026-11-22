@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # collection-ci.yml's weekly full build.
+  schedule:
+    - cron: "41 7 * * 1"
 
 permissions:
   contents: read
@@ -38,6 +41,17 @@ jobs:
     with:
       darwin: true
       linux: true
+
+  # This repo's checks stand in for a collection's packages.
+  # Its renovate-resume repeats nix's on main; a second tick changes nothing.
+  collection:
+    uses: ./.github/workflows/collection-ci.yml
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
   # Its own context: on Hercules's, the real status would pass the gate.
   spoofed-status:
@@ -78,7 +92,7 @@ jobs:
           [ "$OUTCOME" = failure ] && [ "$VERDICT" = timeout ] && [ "$IGNORED" -ge 1 ]
 
   required:
-    needs: [nix, hosted, spoofed-status]
+    needs: [nix, hosted, collection, spoofed-status]
     if: always()
     runs-on: ubuntu-latest
     permissions: {}

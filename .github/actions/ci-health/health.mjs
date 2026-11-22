@@ -32,6 +32,10 @@ const FINISHED = ["success", "failure", "timed_out"];
  */
 
 /**
+ * @typedef {{ conclusion: string, html_url: string }} ScheduledRun
+ */
+
+/**
  * @typedef {object} PullRequest
  * @property {string} title
  * @property {string} html_url
@@ -94,9 +98,10 @@ const when = (iso) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
  * @param {string} opts.branch
  * @param {string} opts.runUrl
  * @param {Date} opts.now
+ * @param {ScheduledRun | null} [opts.scheduled]
  * @returns {string}
  */
-export function render(report, { prs, branch, runUrl, now }) {
+export function render(report, { prs, branch, runUrl, now, scheduled = null }) {
   const { state, red_since, p50, p90, latest } = report;
   const main =
     state === "unknown" ? `No \`${CHECK}\` result yet`
@@ -109,6 +114,9 @@ export function render(report, { prs, branch, runUrl, now }) {
     "| | |",
     "| --- | --- |",
     `| \`${branch}\` | ${main} |`,
+    ...(scheduled
+      ? [`| Scheduled run | ${scheduled.conclusion === "success" ? "🟢" : "🔴"} ${scheduled.conclusion} ([run](${scheduled.html_url})) |`]
+      : []),
     `| \`${CHECK}\` p50, ${WINDOW_DAYS} days | ${duration(p50)}${slow} |`,
     `| \`${CHECK}\` p90, ${WINDOW_DAYS} days | ${duration(p90)} |`,
     `| Runs, ${WINDOW_DAYS} days | ${report.runs} |`,
@@ -163,6 +171,28 @@ export async function collect({ github, repo, workflow, branch, since }) {
   // A quiet repo has nothing in the window, but still has a latest result.
   const { data } = await github.request(route, { ...params, per_page: 50 });
   return join(data.workflow_runs);
+}
+
+/**
+ * A collection's weekly full build: reported, but not a gate.
+ * @param {object} opts
+ * @param {Octokit} opts.github
+ * @param {Repo} opts.repo
+ * @param {string} opts.workflow
+ * @param {string} opts.branch
+ * @returns {Promise<ScheduledRun | null>}
+ */
+export async function latestScheduled({ github, repo, workflow, branch }) {
+  const { data } = await github.request("GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs", {
+    ...repo,
+    workflow_id: workflow,
+    branch,
+    event: "schedule",
+    status: "completed",
+    per_page: 10,
+  });
+  const run = data.workflow_runs.find((/** @type {ScheduledRun} */ r) => FINISHED.includes(r.conclusion));
+  return run ? { conclusion: run.conclusion, html_url: run.html_url } : null;
 }
 
 /**
@@ -225,6 +255,7 @@ export async function run({ github, core, inputs, now = () => new Date() }) {
   const { data: meta } = await github.request("GET /repos/{owner}/{repo}", repo);
   const branch = meta.default_branch;
   const runs = await collect({ github, repo, workflow: inputs.workflow, branch, since });
+  const scheduled = await latestScheduled({ github, repo, workflow: inputs.workflow, branch });
 
   const { data: open } = await github.request("GET /repos/{owner}/{repo}/issues", {
     ...repo,
@@ -241,7 +272,7 @@ export async function run({ github, core, inputs, now = () => new Date() }) {
   ).filter((/** @type {any} */ i) => i.pull_request);
 
   const report = summarize(runs, { prev: parseMarker(issue?.body), since });
-  const body = render(report, { prs, branch, runUrl: inputs["run-url"], now: at });
+  const body = render(report, { prs, branch, runUrl: inputs["run-url"], now: at, scheduled });
   await core.summary.addRaw(body).write();
   core.setOutput("state", report.state);
   if (!write) return;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseMarker, render, summarize } from "../.github/actions/ci-health/health.mjs";
+import { latestScheduled, parseMarker, render, summarize } from "../.github/actions/ci-health/health.mjs";
 
 const since = "2026-11-15T00:00:00Z";
 
@@ -111,6 +111,36 @@ test("renders an empty report", () => {
   assert.match(body, /No `required` result yet/);
   assert.match(body, /\| `required` p90, 7 days \| n\/a \|/);
   assert.match(body, /\| 0 \|\n\nMeasured/);
+});
+
+test("renders the latest scheduled run, which never changes the state", () => {
+  const report = summarize([run(21, "success")], { prev: {}, since });
+  const red = render(report, { ...opts, scheduled: { conclusion: "failure", html_url: "https://example.test/runs/s" } });
+  assert.match(red, /\| Scheduled run \| 🔴 failure \(\[run\]\(https:\/\/example\.test\/runs\/s\)\) \|/);
+  assert.deepEqual(parseMarker(red).state, "green");
+  const green = render(report, { ...opts, scheduled: { conclusion: "success", html_url: "https://example.test/runs/s" } });
+  assert.match(green, /\| Scheduled run \| 🟢 success /);
+  assert.doesNotMatch(render(report, opts), /Scheduled/);
+});
+
+test("latestScheduled skips cancelled runs and is null with none", async () => {
+  const runs = [
+    { conclusion: "cancelled", html_url: "a" },
+    { conclusion: "timed_out", html_url: "b" },
+  ];
+  const github = {
+    async request(route, params) {
+      assert.equal(route, "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs");
+      assert.deepEqual(
+        { event: params.event, status: params.status, branch: params.branch, workflow_id: params.workflow_id },
+        { event: "schedule", status: "completed", branch: "main", workflow_id: "ci.yml" },
+      );
+      return { data: { workflow_runs: params.owner === "o" ? runs : [] } };
+    },
+  };
+  const at = { github, workflow: "ci.yml", branch: "main" };
+  assert.deepEqual(await latestScheduled({ ...at, repo: { owner: "o", repo: "r" } }), { conclusion: "timed_out", html_url: "b" });
+  assert.equal(await latestScheduled({ ...at, repo: { owner: "x", repo: "r" } }), null);
 });
 
 test("a missing, edited or CRLF marker", () => {

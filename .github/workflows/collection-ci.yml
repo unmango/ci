@@ -1,0 +1,100 @@
+name: Collection CI
+
+on:
+  workflow_call:
+    inputs:
+      systems:
+        description: Space-separated systems to build, each on its hosted runner.
+        type: string
+        default: x86_64-linux aarch64-linux aarch64-darwin
+      full:
+        description: Build every output and the nightly list, as a scheduled or manual run does.
+        type: boolean
+        default: false
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        required: false
+
+permissions: {}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.diff.outputs.matrix }}
+    steps:
+      - uses: unmango/actions/setup-nix@e8bbcbd12a2c521c5cb36957c00a7a8f4fe2e766 # v2.0.0
+        with:
+          github_access_token: ${{ github.token }}
+
+      - id: diff
+        uses: $/.github/actions/drv-diff
+        with:
+          base: >-
+            ${{ !(inputs.full || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+            && (github.event.pull_request.base.sha || (github.event_name == 'push' && !github.event.created && github.event.before))
+            || '' }}
+          systems: ${{ inputs.systems }}
+          full: ${{ inputs.full || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+
+  build:
+    needs: [plan]
+    # An eval error fails plan, but what did evaluate still builds.
+    if: ${{ !cancelled() && needs.plan.outputs.matrix != '' && needs.plan.outputs.matrix != '[]' }}
+    name: build (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: unmango/actions/setup-nix@e8bbcbd12a2c521c5cb36957c00a7a8f4fe2e766 # v2.0.0
+        with:
+          github_access_token: ${{ github.token }}
+          extra_nix_config: |
+            min-free = 3221225472
+            max-free = 10737418240
+
+      - name: Build packages
+        env:
+          INSTALLABLES: ${{ toJSON(matrix.packages) }}
+          CACHIX_AUTH_TOKEN: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.CACHIX_AUTH_TOKEN || '' }}
+        run: |
+          mapfile -t attrs < <(jq -r '.[]' <<<"$INSTALLABLES")
+          [ "${#attrs[@]}" -gt 0 ] || exit 0
+          build=(nix build --keep-going --no-link "${attrs[@]}")
+          if [ -n "$CACHIX_AUTH_TOKEN" ]; then build=(cachix watch-exec unstoppablemango -- "${build[@]}"); fi
+          "${build[@]}"
+
+      - name: Build checks
+        if: ${{ !cancelled() }}
+        env:
+          INSTALLABLES: ${{ toJSON(matrix.checks) }}
+        run: |
+          mapfile -t attrs < <(jq -r '.[]' <<<"$INSTALLABLES")
+          [ "${#attrs[@]}" -gt 0 ] || exit 0
+          nix build --keep-going --no-link "${attrs[@]}"
+
+  renovate-resume:
+    needs: [build]
+    # build is skipped when nothing changed.
+    if: ${{ !cancelled() && !failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # The caller's required check needs this whole workflow.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: $/.github/actions/renovate-resume
+        with:
+          before: ${{ github.event.before }}

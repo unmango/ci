@@ -64,6 +64,63 @@ Every hosted job reads Cachix; only a push to `main` gets the token.
 `renovate-resume` runs on a push to `main` once `gate` passes, and its failure never fails the call.
 When the previous completed `required` run on `main` failed or timed out, it ticks the rebase checkbox on every open `renovate/` PR whose latest `required` run failed and that isn't labelled `renovate:needs-human`.
 
+## `collection-ci.yml`
+
+For the package collections, unmango/pkgs, unmango/pulumipkgs and unmango/kubepkgs, on hosted runners only.
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  collection:
+    uses: unmango/ci/.github/workflows/collection-ci.yml@<sha> # <version>
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+  required:
+    needs: [collection]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$NEEDS"
+```
+
+| Input | Default | |
+| --- | --- | --- |
+| `systems` | `x86_64-linux aarch64-linux aarch64-darwin` | Systems to build, on `ubuntu-latest`, `ubuntu-24.04-arm` and `macos-latest` |
+| `full` | `false` | Build everything, as a scheduled or manual run does |
+
+`plan` evaluates `checks` and `packages` for each system with `nix-eval-jobs`, at the head and at the base: the PR's base, or the commit `main` pointed at before the push.
+`build` runs once per system with an output whose `.drv` path differs, so a `flake.lock` bump rebuilds everything and a docs edit builds nothing, and `required` passes.
+A head output that fails to evaluate fails `plan` unless it failed the same way on the base; what did evaluate still builds.
+
+A scheduled or manual run has no base and builds every output, which keeps the cache warm and catches what the diff misses.
+`ci-health.yml` reports its result; it fails the run's `required`, but the health state only reads pushes.
+
+Every job reads Cachix `unstoppablemango`; on `main`, outside PRs, the packages a build makes are pushed to it, and checks never are.
+
+Where the repo imports `flakeModules.ci` from [UnstoppableMango/nix](https://github.com/UnstoppableMango/nix), its exclude lists are never built and its nightly lists only in a full build.
+They are read back from `herculesCI`, against the first of its `ciSystems`.
+
+`renovate-resume` runs on a push to `main` once every build passed, as in `nix-ci.yml`.
+
 ## `ci-health.yml`
 
 Keeps one pinned "CI health" issue, labelled `ci-health`, in the calling repo, for the aggregator in [UnstoppableMango/nix](https://github.com/UnstoppableMango/nix) to read.
@@ -99,7 +156,8 @@ Each run reads the caller's workflow runs on pushes to the default branch and th
 
 - the latest `required` result, green or red;
 - p50 and p90 over the last 7 days, timed from the run's start to `required` finishing, flagging a p50 over 5 minutes;
-- open PRs labelled `renovate:needs-human`.
+- open PRs labelled `renovate:needs-human`;
+- the latest scheduled run, such as `collection-ci.yml`'s full build, if the workflow has one; it never changes the state.
 
 On a `workflow_run` or a schedule it rewrites the issue's body, creating and pinning the issue if there is none, with the caller's `GITHUB_TOKEN`.
 On a PR it only writes the report to the job summary.
@@ -116,8 +174,10 @@ Cancelled runs count toward neither the state nor the percentiles, and `unknown`
 ## Development
 
 Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
-`nix-ci.yml` and `ci-health.yml` use the actions through `$/`, so they come from the same commit.
+The workflows use the actions through `$/`, so they come from the same commit.
+`drv-diff` also runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`; `test/jobs.nix` tests it as `checks.jobs`.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.
+It also calls `collection-ci.yml`, with this repo's checks standing in for packages, and runs its weekly full build.
 `health.yml` calls `ci-health.yml` for this repo's own issue, and also on PRs, where it writes only the job summary.

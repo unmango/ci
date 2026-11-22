@@ -1,0 +1,68 @@
+name: Derivation diff
+description: Evaluate checks and packages at the head and a base commit, and plan a build of the outputs whose derivation changed.
+
+inputs:
+  base:
+    description: Commit to diff against; empty builds every output.
+    default: ""
+  systems:
+    description: Space-separated systems to evaluate.
+    default: x86_64-linux aarch64-linux aarch64-darwin
+  full:
+    description: Also build flakeModules.ci's nightly list.
+    default: "false"
+
+outputs:
+  matrix:
+    description: JSON array of { system, runner, packages, checks }, one per system with something to build.
+    value: ${{ steps.plan.outputs.matrix }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: drv-diff/head
+        persist-credentials: false
+
+    - if: inputs.base != ''
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ inputs.base }}
+        path: drv-diff/base
+        persist-credentials: false
+
+    - name: Evaluate
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        BASE: ${{ inputs.base }}
+        SYSTEMS: ${{ inputs.systems }}
+        FULL: ${{ inputs.full }}
+      run: |
+        # This repo's lock pins nix-eval-jobs; base and head must agree on it.
+        evaluate() {
+          nix run --inputs-from "path:$ACTION_PATH/../../.." nixpkgs#nix-eval-jobs -- \
+            --impure --force-recurse --no-instantiate --workers 4 --max-memory-size 3072 \
+            --argstr flake "git+file://$GITHUB_WORKSPACE/drv-diff/$1" \
+            --argstr systems "$SYSTEMS" --argstr full "$FULL" \
+            "$ACTION_PATH/jobs.nix" >"$RUNNER_TEMP/drv-diff-$1.jsonl"
+        }
+        evaluate head
+        if [ -n "$BASE" ]; then evaluate base; fi
+
+    - id: plan
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        HEAD_JOBS: ${{ runner.temp }}/drv-diff-head.jsonl
+        BASE_JOBS: ${{ inputs.base != '' && format('{0}/drv-diff-base.jsonl', runner.temp) || '' }}
+      with:
+        script: |
+          const { readFile } = require("node:fs/promises");
+          const { run } = await import(`${process.env.ACTION_PATH}/diff.mjs`);
+          await run({
+            core,
+            inputs: { head: process.env.HEAD_JOBS, base: process.env.BASE_JOBS },
+            read: (path) => readFile(path, "utf8"),
+          });

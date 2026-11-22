@@ -22,6 +22,8 @@
  * @property {(cmd: string, args?: string[], opts?: { ignoreReturnCode?: boolean, silent?: boolean }) => Promise<{ exitCode: number, stdout: string, stderr: string }>} getExecOutput
  */
 
+/** @typedef {{ eventName: string, payload: any }} Context */
+
 /** @typedef {{ owner: string, repo: string }} Repo */
 
 /** @typedef {Record<string, string>} Inputs */

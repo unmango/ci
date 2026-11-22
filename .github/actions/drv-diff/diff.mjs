@@ -1,4 +1,4 @@
-/** @import { Core, Exec, Inputs } from "../types.mjs" */
+/** @import { Context, Core, Exec, Inputs } from "../types.mjs" */
 
 /**
  * One line of nix-eval-jobs output.
@@ -110,10 +110,23 @@ export function render({ matrix, errors }, full) {
 }
 
 /**
+ * The commit to diff against, or "" to build everything.
+ * @param {Context} context
+ * @param {boolean} full
+ * @returns {string}
+ */
+export function baseSha({ eventName, payload }, full) {
+  if (full || eventName === "schedule" || eventName === "workflow_dispatch") return "";
+  if (eventName === "pull_request") return payload.pull_request.base.sha;
+  if (eventName === "push" && !payload.created) return payload.before;
+  return "";
+}
+
+/**
  * nix-eval-jobs from this repo's lock, so base and head agree on it.
  * @param {object} opts
  * @param {string} opts.actionPath
- * @param {string} opts.flake Checkout to evaluate.
+ * @param {string} opts.flake
  * @param {string} opts.systems
  * @param {boolean} opts.full
  * @returns {string[]} Arguments to `nix`.
@@ -133,7 +146,7 @@ export const evalArgs = ({ actionPath, flake, systems, full }) => [
   "3072",
   "--argstr",
   "flake",
-  `git+file://${flake}`,
+  flake,
   "--argstr",
   "systems",
   systems,
@@ -147,24 +160,34 @@ export const evalArgs = ({ actionPath, flake, systems, full }) => [
  * @param {object} opts
  * @param {Exec} opts.exec
  * @param {Core} opts.core
- * @param {Inputs} opts.inputs `head` and `base` checkouts, `base` empty for none.
+ * @param {Context} opts.context
+ * @param {Inputs} opts.inputs `head` is the checkout; `token` fetches the base into it.
  */
-export async function run({ exec, core, inputs }) {
-  const full = inputs.full === "true";
+export async function run({ exec, core, context, inputs }) {
+  const sha = baseSha(context, inputs.full === "true");
+  const full = sha === "";
+  /** @type {(cmd: string, args: string[]) => Promise<string>} */
+  const output = async (cmd, args) => {
+    const { exitCode, stdout, stderr } = await exec.getExecOutput(cmd, args, { silent: true, ignoreReturnCode: true });
+    if (exitCode !== 0) throw new Error(`${cmd} ${args[0]} failed:\n${stderr}`);
+    return stdout;
+  };
   /** @type {(flake: string) => Promise<Job[]>} */
   const evaluate = async (flake) => {
     const args = evalArgs({ actionPath: inputs["action-path"], flake, systems: inputs.systems, full });
-    const { exitCode, stdout, stderr } = await exec.getExecOutput("nix", args, { silent: true, ignoreReturnCode: true });
-    if (exitCode !== 0) throw new Error(`nix-eval-jobs failed on ${flake}:\n${stderr}`);
+    const stdout = await output("nix", args);
     return parseJobs(stdout);
   };
 
-  const head = await evaluate(inputs.head);
+  const head = await evaluate(`git+file://${inputs.head}`);
   let base = null;
-  if (inputs.base) {
+  if (sha) {
     try {
-      base = await evaluate(inputs.base);
+      const auth = btoa(`x-access-token:${inputs.token}`);
+      await output("git", ["-C", inputs.head, "-c", `http.extraheader=AUTHORIZATION: basic ${auth}`, "fetch", "--depth", "1", "origin", sha]);
+      base = await evaluate(`git+file://${inputs.head}?rev=${sha}&shallow=1`);
     } catch (/** @type {any} */ e) {
+      // A force-push can leave the base commit gone.
       core.warning(`${e.message}\nBuilding every output.`);
     }
   }

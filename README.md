@@ -112,7 +112,7 @@ jobs:
 A check whose source is the whole tree, such as treefmt's, is the exception: any edit rebuilds it.
 An aggregate like a `linkFarm` of every package changes with any package, so building it realises the whole set; put it on the exclude list.
 A head output that fails to evaluate fails `plan` unless it failed the same way on the base; what did evaluate still builds.
-When the base can't be checked out or evaluated, everything builds.
+When the base can't be fetched or evaluated, everything builds.
 
 A scheduled or manual run has no base and builds every output, which keeps the cache warm and catches what the diff misses.
 `required` skips a scheduled run, so it gates nothing and `renovate-resume` never reads it; `ci-health.yml` reports the run's result instead.

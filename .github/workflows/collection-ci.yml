@@ -22,8 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      FULL: ${{ inputs.full || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     outputs:
       matrix: ${{ steps.diff.outputs.matrix }}
     steps:
@@ -34,12 +32,8 @@ jobs:
       - id: diff
         uses: $/.github/actions/drv-diff
         with:
-          base: >-
-            ${{ env.FULL != 'true'
-            && (github.event.pull_request.base.sha || (github.event_name == 'push' && !github.event.created && github.event.before))
-            || '' }}
           systems: ${{ inputs.systems }}
-          full: ${{ env.FULL }}
+          full: ${{ inputs.full }}
 
   build:
     needs: [plan]

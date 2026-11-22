@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evalArgs, installable, parseJobs, plan, run } from "../.github/actions/drv-diff/diff.mjs";
+import { baseSha, evalArgs, installable, parseJobs, plan, run } from "../.github/actions/drv-diff/diff.mjs";
 
 /** One nix-eval-jobs line. */
 const job = (type, system, name, drv, extra = {}) => ({
@@ -125,10 +125,25 @@ function fakeCore() {
   };
 }
 
-const inputs = { head: "/w/head", base: "/w/base", systems: "x86_64-linux", full: "false", "action-path": "/a/drv-diff" };
+const inputs = { head: "/w", systems: "x86_64-linux", full: "false", token: "t", "action-path": "/a/drv-diff" };
+const pr = { eventName: "pull_request", payload: { pull_request: { base: { sha: "b1" } } } };
+const HEAD = "git+file:///w";
+const BASE = "git+file:///w?rev=b1&shallow=1";
 
-/** nix-eval-jobs output, or a failure, per checkout. */
-function fakeExec(out) {
+test("baseSha diffs a PR against its base and a push against before", () => {
+  assert.equal(baseSha(pr, false), "b1");
+  assert.equal(baseSha({ eventName: "push", payload: { before: "b0", created: false } }, false), "b0");
+});
+
+test("baseSha builds everything for a new branch, a schedule, a manual run, or full", () => {
+  assert.equal(baseSha({ eventName: "push", payload: { before: "0".repeat(40), created: true } }, false), "");
+  assert.equal(baseSha({ eventName: "schedule", payload: {} }, false), "");
+  assert.equal(baseSha({ eventName: "workflow_dispatch", payload: {} }, false), "");
+  assert.equal(baseSha(pr, true), "");
+});
+
+/** nix-eval-jobs output, or a failure, per flake; git fetch fails when `fetch` is false. */
+function fakeExec(out, { fetch = true } = {}) {
   const calls = [];
   return {
     calls,
@@ -136,60 +151,73 @@ function fakeExec(out) {
       throw new Error("unexpected exec");
     },
     async getExecOutput(cmd, args, opts) {
-      assert.equal(cmd, "nix");
       assert.deepEqual(opts, { silent: true, ignoreReturnCode: true });
-      calls.push(args);
-      const flake = args[args.indexOf("flake") + 1].replace("git+file://", "");
-      const stdout = out[flake];
+      calls.push([cmd, args]);
+      if (cmd === "git") {
+        assert.deepEqual(args.slice(0, 3), ["-C", "/w", "-c"]);
+        assert.equal(args[3], `http.extraheader=AUTHORIZATION: basic ${btoa("x-access-token:t")}`);
+        assert.deepEqual(args.slice(4), ["fetch", "--depth", "1", "origin", "b1"]);
+        return fetch ? { exitCode: 0, stdout: "", stderr: "" } : { exitCode: 128, stdout: "", stderr: "not our ref" };
+      }
+      assert.equal(cmd, "nix");
+      const stdout = out[args[args.indexOf("flake") + 1]];
       return stdout === undefined ? { exitCode: 1, stdout: "", stderr: "eval broke" } : { exitCode: 0, stdout, stderr: "" };
     },
   };
 }
 
 test("evalArgs runs this repo's nix-eval-jobs over jobs.nix", () => {
-  const args = evalArgs({ actionPath: "/a/drv-diff", flake: "/w/head", systems: "x86_64-linux aarch64-darwin", full: true });
+  const args = evalArgs({ actionPath: "/a/drv-diff", flake: HEAD, systems: "x86_64-linux aarch64-darwin", full: true });
   assert.deepEqual(args.slice(0, 5), ["run", "--inputs-from", "path:/a/drv-diff/../../..", "nixpkgs#nix-eval-jobs", "--"]);
   assert.equal(args.at(-1), "/a/drv-diff/jobs.nix");
-  assert.deepEqual(args.slice(args.indexOf("flake") - 1, args.indexOf("flake") + 2), ["--argstr", "flake", "git+file:///w/head"]);
+  assert.deepEqual(args.slice(args.indexOf("flake") - 1, args.indexOf("flake") + 2), ["--argstr", "flake", HEAD]);
   assert.deepEqual(args.slice(args.indexOf("full") - 1, args.indexOf("full") + 2), ["--arg", "full", "true"]);
   assert.equal(args[args.indexOf("systems") + 1], "x86_64-linux aarch64-darwin");
 });
 
-test("run sets the matrix and summarizes what it builds", async () => {
+test("run fetches the base and builds what changed", async () => {
   const core = fakeCore();
-  const exec = fakeExec({ "/w/head": jsonl(...base.slice(1), job("packages", "x86_64-linux", "a", "2")), "/w/base": jsonl(...base) });
-  await run({ exec, core, inputs });
+  const exec = fakeExec({ [HEAD]: jsonl(...base.slice(1), job("packages", "x86_64-linux", "a", "2")), [BASE]: jsonl(...base) });
+  await run({ exec, core, context: pr, inputs });
   assert.deepEqual(JSON.parse(core.outputs.matrix), [
     { system: "x86_64-linux", runner: "ubuntu-latest", packages: [".#packages.x86_64-linux.a"], checks: [] },
   ]);
   assert.match(core.text(), /packages\.x86_64-linux\.a/);
   assert.deepEqual(core.failed, []);
-  assert.equal(exec.calls.length, 2);
+  assert.deepEqual(exec.calls.map(([cmd]) => cmd), ["nix", "git", "nix"]);
 });
 
-test("run with no base builds everything", async () => {
+test("run with no base builds everything, with the nightly list", async () => {
   const core = fakeCore();
-  const exec = fakeExec({ "/w/head": jsonl(...base) });
-  await run({ exec, core, inputs: { ...inputs, base: "" } });
+  const exec = fakeExec({ [HEAD]: jsonl(...base) });
+  await run({ exec, core, context: { eventName: "schedule", payload: {} }, inputs });
   assert.equal(JSON.parse(core.outputs.matrix).length, 2);
   assert.equal(exec.calls.length, 1);
+  assert.equal(exec.calls[0][1][exec.calls[0][1].indexOf("full") + 1], "true");
+});
+
+test("run builds everything when the base can't be fetched", async () => {
+  const core = fakeCore();
+  await run({ exec: fakeExec({ [HEAD]: jsonl(...base) }, { fetch: false }), core, context: pr, inputs });
+  assert.equal(JSON.parse(core.outputs.matrix).length, 2);
+  assert.match(core.warnings[0], /not our ref/);
 });
 
 test("run builds everything when the base fails to evaluate", async () => {
   const core = fakeCore();
-  await run({ exec: fakeExec({ "/w/head": jsonl(...base) }), core, inputs });
+  await run({ exec: fakeExec({ [HEAD]: jsonl(...base) }), core, context: pr, inputs });
   assert.equal(JSON.parse(core.outputs.matrix).length, 2);
   assert.match(core.warnings[0], /eval broke/);
   assert.deepEqual(core.failed, []);
 });
 
 test("run throws when the head fails to evaluate", async () => {
-  await assert.rejects(run({ exec: fakeExec({}), core: fakeCore(), inputs }), /eval broke/);
+  await assert.rejects(run({ exec: fakeExec({}), core: fakeCore(), context: pr, inputs }), /eval broke/);
 });
 
 test("run says when nothing changed", async () => {
   const core = fakeCore();
-  await run({ exec: fakeExec({ "/w/head": jsonl(...base), "/w/base": jsonl(...base) }), core, inputs });
+  await run({ exec: fakeExec({ [HEAD]: jsonl(...base), [BASE]: jsonl(...base) }), core, context: pr, inputs });
   assert.equal(core.outputs.matrix, "[]");
   assert.match(core.text(), /Nothing to build/);
 });
@@ -197,7 +225,7 @@ test("run says when nothing changed", async () => {
 test("run fails on eval errors but still sets the matrix", async () => {
   const core = fakeCore();
   const head = jsonl(job("packages", "x86_64-linux", "a", "2"), broken("packages", "x86_64-linux", "c", "boom"));
-  await run({ exec: fakeExec({ "/w/head": head, "/w/base": jsonl(...base) }), core, inputs });
+  await run({ exec: fakeExec({ [HEAD]: head, [BASE]: jsonl(...base) }), core, context: pr, inputs });
   assert.equal(JSON.parse(core.outputs.matrix).length, 1);
   assert.equal(core.failed.length, 1);
   assert.match(core.text(), /boom/);

@@ -20,7 +20,7 @@ on:
         type: boolean
         default: true
       hercules-timeout-minutes:
-        description: How long the gate waits for Hercules.
+        description: How long the gate waits for Hercules; keep under the job's 360.
         type: number
         default: 345
     secrets:
@@ -99,6 +99,8 @@ jobs:
   renovate-resume:
     needs: [gate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # The caller's required check needs this whole workflow.
+    continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
       checks: read

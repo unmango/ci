@@ -25,7 +25,7 @@ inputs:
     default: "345"
   interval-seconds:
     description: Seconds between polls.
-    default: "30"
+    default: "60"
 
 outputs:
   verdict:

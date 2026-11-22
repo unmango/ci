@@ -2,7 +2,7 @@ const byNewest = (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) |
 
 export function evaluate(statuses, { context, login }) {
   const forContext = statuses.filter((s) => s.context === context).sort(byNewest);
-  // A status's creator is the only thing tying it to an app: the app's bot account.
+  // Only the creator ties a status to an app.
   const trusted = (s) => s.creator?.login === login && s.creator?.type === "Bot";
   const ignored = forContext.filter((s) => !trusted(s));
   const latest = forContext.find(trusted);

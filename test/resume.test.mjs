@@ -123,3 +123,10 @@ test("resume skips a failing PR whose checkbox is already ticked", async () => {
   const api = fakeApi({ commits: ["b"], runs: { b: red, sha1: red }, prs: [pr(1, { body: tickRebase(body) })] });
   assert.deepEqual(await resume({ ...resumeOpts, api, before: "b" }), []);
 });
+
+test("a timed-out run counts as failed, a cancelled one doesn't", async () => {
+  const timedOut = [run(1, "completed", "timed_out", "2026-01-01T00:00:00Z")];
+  const cancelled = [run(1, "completed", "cancelled", "2026-01-01T00:00:00Z")];
+  assert.equal(await previousRequiredFailed({ ...base, api: fakeApi({ commits: ["b"], runs: { b: timedOut } }), before: "b" }), true);
+  assert.equal(await previousRequiredFailed({ ...base, api: fakeApi({ commits: ["b"], runs: { b: cancelled } }), before: "b" }), false);
+});

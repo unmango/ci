@@ -51,7 +51,6 @@
 
           devShells.default = pkgs.mkShellNoCC {
             packages = with pkgs; [
-              gnumake
               nixfmt
               nodejs_24
             ];

@@ -16,14 +16,16 @@ on:
   pull_request:
 
 permissions:
-  checks: read
   contents: read
-  pull-requests: write
-  statuses: read
 
 jobs:
   nix:
     uses: unmango/ci/.github/workflows/nix-ci.yml@<sha> # <version>
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+      statuses: read
     with:
       darwin: true
     secrets:
@@ -42,7 +44,7 @@ jobs:
 
 The `required` job stays in the caller: GitHub names a called workflow's checks `<caller job> / <job>`, so only a caller job can hold the `required` context the ruleset asks for.
 Add any other job that should block a merge to its `needs`.
-The caller grants every permission a job in the workflow asks for, or the run fails to start.
+The calling job grants every permission a job in the workflow asks for, or the run fails to start.
 
 | Input | Default | |
 | --- | --- | --- |
@@ -50,7 +52,7 @@ The caller grants every permission a job in the workflow asks for, or the run fa
 | `aarch64-linux` | `false` | `nix flake check` on `ubuntu-24.04-arm` |
 | `linux` | `false` | `nix flake check` on a hosted x86_64 runner instead of waiting for Hercules; for private repos and repos Hercules doesn't build |
 | `cachix-push` | `true` | Push hosted builds to `unstoppablemango`, on pushes to `main` only |
-| `hercules-timeout-minutes` | `345` | How long `gate` waits for Hercules |
+| `hercules-timeout-minutes` | `345` | How long `gate` waits for Hercules; under 360, where the hosted job stops |
 
 Every hosted job reads Cachix; only a push to `main` gets the token.
 
@@ -59,8 +61,8 @@ Every hosted job reads Cachix; only a push to `main` gets the token.
 - on a branch PR or `main`, waits for `ci/hercules/onPush/default` on the head commit and passes only on a green status created by the Hercules app (24794), ignoring the same context from anyone else;
 - on a fork PR, or with `linux: true`, the hosted `linux` job builds instead and nothing waits for Hercules.
 
-`renovate-resume` runs on a push to `main` once `gate` passes.
-When the previous completed `required` run on `main` failed, it ticks the rebase checkbox on every open `renovate/` PR whose latest `required` run failed and that isn't labelled `renovate:needs-human`.
+`renovate-resume` runs on a push to `main` once `gate` passes, and its failure never fails the call.
+When the previous completed `required` run on `main` failed or timed out, it ticks the rebase checkbox on every open `renovate/` PR whose latest `required` run failed and that isn't labelled `renovate:needs-human`.
 
 ## Development
 

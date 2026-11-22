@@ -1,4 +1,3 @@
-// Runs each action's entrypoint the way the runner does, against a fake API.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";

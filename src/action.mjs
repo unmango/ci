@@ -15,7 +15,7 @@ export async function main(fn) {
   try {
     await fn();
   } catch (err) {
-    console.log(`::error::${err.message}`);
+    console.log(`::error::${err.message.replace(/\r?\n/g, "%0A")}`);
     process.exitCode = 1;
   }
 }

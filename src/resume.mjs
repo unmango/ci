@@ -1,3 +1,5 @@
+const failed = (run) => run.conclusion === "failure" || run.conclusion === "timed_out";
+
 const UNTICKED = /- \[ \] <!-- rebase-check -->/;
 
 export function tickRebase(body) {
@@ -28,9 +30,8 @@ export async function previousRequiredFailed({ api, repo, before, checkName, app
   if (!before || /^0+$/.test(before)) return false;
   const commits = await api.get(`/repos/${repo}/commits?sha=${before}&per_page=${depth}`);
   for (const { sha } of commits) {
-    // A run still in progress hasn't decided anything; look further back.
     const latest = latestRun(await runsFor({ api, repo, sha, checkName, appId }), { completed: true });
-    if (latest) return latest.conclusion === "failure";
+    if (latest) return failed(latest);
   }
   return false;
 }
@@ -44,7 +45,7 @@ export async function resume({ api, repo, before, checkName, appId, depth, prefi
   const prs = await api.paginate(`/repos/${repo}/pulls?state=open&per_page=100`);
   for (const pr of prs.filter((p) => isCandidate(p, { repo, prefix, label }))) {
     const latest = latestRun(await runsFor({ api, repo, sha: pr.head.sha, checkName, appId }));
-    if (latest?.status !== "completed" || latest.conclusion !== "failure") continue;
+    if (latest?.status !== "completed" || !failed(latest)) continue;
     const body = tickRebase(pr.body);
     if (!body) {
       log(`#${pr.number}: no unticked rebase checkbox`);

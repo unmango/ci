@@ -2,6 +2,11 @@ name: CI health
 
 on:
   workflow_call:
+    inputs:
+      workflow:
+        description: Workflow file holding the required job.
+        type: string
+        default: ci.yml
 
 permissions: {}
 
@@ -18,4 +23,5 @@ jobs:
     steps:
       - uses: $/.github/actions/ci-health
         with:
+          workflow: ${{ inputs.workflow }}
           write: ${{ github.event_name != 'pull_request' }}

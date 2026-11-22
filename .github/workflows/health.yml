@@ -1,0 +1,23 @@
+name: CI health
+
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # This repo only, to exercise the action; it writes nothing on a PR.
+  pull_request:
+
+permissions: {}
+
+jobs:
+  ci-health:
+    # A fork PR's branch can be named main too.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push'
+    uses: ./.github/workflows/ci-health.yml
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: read

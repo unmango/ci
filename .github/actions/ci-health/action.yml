@@ -8,9 +8,9 @@ inputs:
   repository:
     description: owner/repo to report on.
     default: ${{ github.repository }}
-  workflow-ref:
-    description: Ref of the workflow holding the required job; in a called workflow, github.workflow_ref is the caller's.
-    default: ${{ github.workflow_ref }}
+  workflow:
+    description: Workflow file holding the required job.
+    default: ci.yml
   run-url:
     description: Link to this run, written into the issue.
     default: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

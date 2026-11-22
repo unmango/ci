@@ -67,33 +67,24 @@ When the previous completed `required` run on `main` failed or timed out, it tic
 ## `ci-health.yml`
 
 Keeps one pinned "CI health" issue, labelled `ci-health`, in the calling repo, for the aggregator in [UnstoppableMango/nix](https://github.com/UnstoppableMango/nix) to read.
-Call it from `ci.yml`, after `required`, and add a daily schedule:
+Call it from its own workflow, which runs once `CI` finishes on `main` and once a day, so `ci.yml` needs no change:
 
 ```yaml
+name: CI health
+
 on:
-  push:
-    branches: [main]
-  pull_request:
   schedule:
     - cron: "23 6 * * *"
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions: {}
 
 jobs:
-  nix:
-    if: github.event_name != 'schedule'
-    # ...
-
-  required:
-    needs: [nix]
-    if: always() && github.event_name != 'schedule'
-    # ...
-
   ci-health:
-    needs: [required]
-    if: ${{ !cancelled() }}
+    if: github.event_name == 'schedule' || github.event.workflow_run.event == 'push'
     uses: unmango/ci/.github/workflows/ci-health.yml@<sha> # <version>
     permissions:
       actions: read
@@ -101,8 +92,8 @@ jobs:
       pull-requests: read
 ```
 
-Every other job skips the schedule, `required` included, or a scheduled run would put a green `required` on the head of `main`.
-`event_name` in the concurrency group keeps a scheduled run from queueing behind a push's run on the same commit.
+The `if` keeps out a fork PR whose branch is also named `main`, which `branches` alone would let through.
+The `workflow` input names the file holding `required`, `ci.yml` by default.
 
 Each run reads the caller's workflow runs on pushes to the default branch and the `required` job in each:
 
@@ -110,7 +101,7 @@ Each run reads the caller's workflow runs on pushes to the default branch and th
 - p50 and p90 over the last 7 days, timed from the run's start to `required` finishing, flagging a p50 over 5 minutes;
 - open PRs labelled `renovate:needs-human`.
 
-On a push or a schedule it rewrites the issue's body, creating and pinning the issue if there is none, with the caller's `GITHUB_TOKEN`.
+On a `workflow_run` or a schedule it rewrites the issue's body, creating and pinning the issue if there is none, with the caller's `GITHUB_TOKEN`.
 On a PR it only writes the report to the job summary.
 While `main` is red the issue carries `ci-health:red`, which comes off once it is green.
 The body's first line is machine-readable, with `red_since` the creation time of the first run in the red streak:
@@ -128,4 +119,5 @@ Each composite action under `.github/actions/` runs the module beside it through
 `nix-ci.yml` and `ci-health.yml` use the actions through `$/`, so they come from the same commit.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
-`ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status, and calls `ci-health.yml` for this repo's own issue.
+`ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.
+`health.yml` calls `ci-health.yml` for this repo's own issue, and also on PRs, where it writes only the job summary.

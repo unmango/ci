@@ -224,9 +224,7 @@ export async function run({ github, core, inputs, now = () => new Date() }) {
 
   const { data: meta } = await github.request("GET /repos/{owner}/{repo}", repo);
   const branch = meta.default_branch;
-  // owner/repo/.github/workflows/<file>@<ref>
-  const workflow = inputs["workflow-ref"].replace(/@.*$/, "").replace(/^.*\//, "");
-  const runs = await collect({ github, repo, workflow, branch, since });
+  const runs = await collect({ github, repo, workflow: inputs.workflow, branch, since });
 
   const { data: open } = await github.request("GET /repos/{owner}/{repo}/issues", {
     ...repo,

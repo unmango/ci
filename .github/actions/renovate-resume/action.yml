@@ -1,0 +1,47 @@
+name: Renovate resume
+description: After a red main turns green, tick the rebase checkbox on Renovate PRs whose required check failed.
+
+inputs:
+  token:
+    description: Token with checks:read and pull-requests:write on the repository.
+    default: ${{ github.token }}
+  repository:
+    description: owner/repo to act on.
+    default: ${{ github.repository }}
+  before:
+    description: The commit main pointed at before this push.
+    required: true
+  check-name:
+    description: Name of the gate's check run.
+    default: required
+  app-id:
+    description: App that must have created the check run (15368 is GitHub Actions).
+    default: "15368"
+  branch-prefix:
+    description: Head branch prefix of Renovate PRs.
+    default: renovate/
+  label:
+    description: PRs carrying this label are left alone.
+    default: renovate:needs-human
+  depth:
+    description: How many main commits to search for the previous completed run.
+    default: "20"
+
+outputs:
+  ticked:
+    description: JSON array of the PR numbers ticked.
+    value: ${{ steps.resume.outputs.ticked }}
+
+runs:
+  using: composite
+  steps:
+    - id: resume
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUTS: ${{ toJSON(inputs) }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = await import(`${process.env.ACTION_PATH}/resume.mjs`);
+          await run({ github, core, inputs: JSON.parse(process.env.INPUTS) });

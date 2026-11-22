@@ -1,0 +1,50 @@
+name: Hercules gate
+description: Wait for a Hercules CI commit status posted by the Hercules app and pass only if it is green.
+
+inputs:
+  token:
+    description: Token with statuses:read on the repository.
+    default: ${{ github.token }}
+  repository:
+    description: owner/repo whose commit to read.
+    default: ${{ github.repository }}
+  sha:
+    description: Commit to read statuses from.
+    required: true
+  context:
+    description: Status context to wait for.
+    default: ci/hercules/onPush/default
+  app-slug:
+    description: Slug of the app whose statuses count.
+    default: hercules-ci
+  app-id:
+    description: Id the app behind app-slug must have.
+    default: "24794"
+  timeout-minutes:
+    description: How long to wait for a final status.
+    default: "345"
+  interval-seconds:
+    description: Seconds between polls.
+    default: "60"
+
+outputs:
+  verdict:
+    description: pass, fail, or timeout.
+    value: ${{ steps.gate.outputs.verdict }}
+  ignored:
+    description: Number of statuses on the context ignored because another creator posted them.
+    value: ${{ steps.gate.outputs.ignored }}
+
+runs:
+  using: composite
+  steps:
+    - id: gate
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUTS: ${{ toJSON(inputs) }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = await import(`${process.env.ACTION_PATH}/gate.mjs`);
+          await run({ github, core, inputs: JSON.parse(process.env.INPUTS) });

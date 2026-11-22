@@ -1,0 +1,112 @@
+name: Nix CI
+
+on:
+  workflow_call:
+    inputs:
+      darwin:
+        description: Run `nix flake check` on macos-latest.
+        type: boolean
+        default: false
+      aarch64-linux:
+        description: Run `nix flake check` on ubuntu-24.04-arm.
+        type: boolean
+        default: false
+      linux:
+        description: Run `nix flake check` on a hosted x86_64 runner in place of waiting for Hercules. Fork PRs always do.
+        type: boolean
+        default: false
+      cachix-push:
+        description: Push what hosted jobs build to Cachix, on pushes to main only.
+        type: boolean
+        default: true
+      hercules-timeout-minutes:
+        description: How long the gate waits for Hercules; keep under the job's 360.
+        type: number
+        default: 345
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        required: false
+
+permissions: {}
+
+jobs:
+  darwin:
+    if: inputs.darwin
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: unmango/actions/setup-nix@e8bbcbd12a2c521c5cb36957c00a7a8f4fe2e766 # v2.0.0
+        with:
+          github_access_token: ${{ github.token }}
+          cachix_auth_token: ${{ inputs.cachix-push && github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.CACHIX_AUTH_TOKEN || '' }}
+      - run: nix flake check --keep-going
+
+  aarch64-linux:
+    if: inputs.aarch64-linux
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: unmango/actions/setup-nix@e8bbcbd12a2c521c5cb36957c00a7a8f4fe2e766 # v2.0.0
+        with:
+          github_access_token: ${{ github.token }}
+          cachix_auth_token: ${{ inputs.cachix-push && github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.CACHIX_AUTH_TOKEN || '' }}
+      - run: nix flake check --keep-going
+
+  linux:
+    # Fork code never reaches the builder VM, so Hercules never posts for it.
+    if: inputs.linux || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: unmango/actions/setup-nix@e8bbcbd12a2c521c5cb36957c00a7a8f4fe2e766 # v2.0.0
+        with:
+          github_access_token: ${{ github.token }}
+          cachix_auth_token: ${{ inputs.cachix-push && github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.CACHIX_AUTH_TOKEN || '' }}
+      - run: nix flake check --keep-going
+
+  gate:
+    needs: [darwin, aarch64-linux, linux]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    # Hosted jobs stop at 6 hours.
+    timeout-minutes: 360
+    permissions:
+      statuses: read
+    steps:
+      - name: Hosted jobs passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$NEEDS"
+
+      - if: needs.linux.result == 'skipped'
+        uses: $/.github/actions/hercules-gate
+        with:
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          timeout-minutes: ${{ inputs.hercules-timeout-minutes }}
+
+  renovate-resume:
+    needs: [gate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # The caller's required check needs this whole workflow.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: $/.github/actions/renovate-resume
+        with:
+          before: ${{ github.event.before }}

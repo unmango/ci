@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  checks: read
+  contents: read
+  pull-requests: write
+  statuses: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The path every Hercules-built repo takes: a branch PR or main waits for Hercules.
+  nix:
+    uses: ./.github/workflows/nix-ci.yml
+    with:
+      aarch64-linux: true
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+  # The path a fork PR, or a repo Hercules doesn't build, takes.
+  hosted:
+    uses: ./.github/workflows/nix-ci.yml
+    with:
+      darwin: true
+      linux: true
+
+  # Posts a green status from the Actions app on a context, then holds the
+  # gate to ignoring it.
+  spoofed-status:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    env:
+      CONTEXT: nix-ci-test/spoofed
+      SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Post a spoofed status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA"
+          -f state=success -f context="$CONTEXT"
+          -f description="Spoofed status the Hercules gate must ignore"
+      - id: gate
+        continue-on-error: true
+        uses: ./.github/actions/hercules-gate
+        with:
+          sha: ${{ env.SHA }}
+          context: ${{ env.CONTEXT }}
+          timeout-minutes: "1"
+          interval-seconds: "10"
+      - name: The gate rejected it
+        env:
+          OUTCOME: ${{ steps.gate.outcome }}
+          VERDICT: ${{ steps.gate.outputs.verdict }}
+          IGNORED: ${{ steps.gate.outputs.ignored }}
+        run: |
+          echo "outcome=$OUTCOME verdict=$VERDICT ignored=$IGNORED"
+          [ "$OUTCOME" = failure ] && [ "$VERDICT" = timeout ] && [ "$IGNORED" -ge 1 ]
+
+  required:
+    needs: [nix, hosted, spoofed-status]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Every needed job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$NEEDS"

@@ -4,16 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "23 6 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   nix:
+    if: github.event_name != 'schedule'
     uses: ./.github/workflows/nix-ci.yml
     permissions:
       checks: read
@@ -41,7 +44,7 @@ jobs:
 
   # Its own context: on Hercules's, the real status would pass the gate.
   spoofed-status:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -79,7 +82,8 @@ jobs:
 
   required:
     needs: [nix, hosted, spoofed-status]
-    if: always()
+    # A scheduled run would put a green required on main's head.
+    if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -87,3 +91,14 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$NEEDS"
+
+  # Writes the issue on push and schedule; a PR only renders the report.
+  ci-health:
+    needs: [required]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/ci-health.yml
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: read

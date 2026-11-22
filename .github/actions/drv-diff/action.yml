@@ -1,0 +1,37 @@
+name: Derivation diff
+description: Evaluate checks and packages at the head and its base commit, and plan a build of the outputs whose derivation changed.
+
+inputs:
+  systems:
+    description: Space-separated systems to evaluate.
+    default: x86_64-linux aarch64-linux aarch64-darwin
+  full:
+    description: Build every output and flakeModules.ci's nightly list, as a scheduled or manual run does.
+    default: "false"
+  token:
+    description: Fetches the base commit.
+    default: ${{ github.token }}
+
+outputs:
+  matrix:
+    description: JSON array of { system, runner, packages, checks }, one per system with something to build.
+    value: ${{ steps.plan.outputs.matrix }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - id: plan
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUTS: ${{ toJSON(inputs) }}
+      with:
+        script: |
+          const { run } = await import(`${process.env.ACTION_PATH}/diff.mjs`);
+          const { ACTION_PATH, GITHUB_WORKSPACE, INPUTS } = process.env;
+          const inputs = { ...JSON.parse(INPUTS), head: GITHUB_WORKSPACE, "action-path": ACTION_PATH };
+          await run({ exec, core, context, inputs });

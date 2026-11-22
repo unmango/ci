@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "41 7 * * 1"
 
 permissions:
   contents: read
@@ -14,6 +16,7 @@ concurrency:
 
 jobs:
   nix:
+    if: github.event_name != 'schedule'
     uses: ./.github/workflows/nix-ci.yml
     permissions:
       checks: read
@@ -39,9 +42,20 @@ jobs:
       darwin: true
       linux: true
 
+  # This repo's checks stand in for a collection's packages.
+  # renovate-resume runs twice on main; the second tick is a no-op.
+  collection:
+    uses: ./.github/workflows/collection-ci.yml
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
   # Its own context: on Hercules's, the real status would pass the gate.
   spoofed-status:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -78,8 +92,9 @@ jobs:
           [ "$OUTCOME" = failure ] && [ "$VERDICT" = timeout ] && [ "$IGNORED" -ge 1 ]
 
   required:
-    needs: [nix, hosted, spoofed-status]
-    if: always()
+    needs: [nix, hosted, collection, spoofed-status]
+    # The weekly build reports through ci-health, not the gate.
+    if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions: {}
     steps:

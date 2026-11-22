@@ -48,6 +48,8 @@
                 touch $out
               '';
 
+          checks.jobs = pkgs.callPackage ./test/jobs.nix { };
+
           checks.types =
             pkgs.runCommand "actions-types"
               {

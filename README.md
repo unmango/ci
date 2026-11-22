@@ -125,7 +125,7 @@ Cancelled runs count toward neither the state nor the percentiles, and `unknown`
 ## Development
 
 Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
-`nix-ci.yml` uses the actions through `$/`, so they come from the same commit.
+`nix-ci.yml` and `ci-health.yml` use the actions through `$/`, so they come from the same commit.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status, and calls `ci-health.yml` for this repo's own issue.

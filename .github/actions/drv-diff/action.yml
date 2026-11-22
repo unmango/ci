@@ -27,7 +27,7 @@ runs:
 
     - id: base
       if: inputs.base != ''
-      # A force-push's before may be gone; then everything builds.
+      # A force-push can leave the base commit gone; then everything builds.
       continue-on-error: true
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:

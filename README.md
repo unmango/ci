@@ -97,7 +97,6 @@ jobs:
     uses: unmango/ci/.github/workflows/ci-health.yml@<sha> # <version>
     permissions:
       actions: read
-      contents: read
       issues: write
       pull-requests: read
 ```
@@ -121,13 +120,7 @@ The body's first line is machine-readable, with `red_since` the creation time of
 ```
 
 `state` is `green`, `red`, or `unknown`; `p50` and `p90` are seconds, or `null` with no runs in the window.
-
-| Input | Default | |
-| --- | --- | --- |
-| `check-name` | `required` | The caller's gate job |
-| `workflow` | the caller's | Workflow file holding that job |
-| `window-days` | `7` | How far back the percentiles look |
-| `p50-threshold-minutes` | `5` | Flag a p50 over this |
+Cancelled runs count toward neither the state nor the percentiles, and `unknown` leaves the label as it was.
 
 ## Development
 

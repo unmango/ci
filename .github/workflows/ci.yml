@@ -92,13 +92,11 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$NEEDS"
 
-  # Writes the issue on push and schedule; a PR only renders the report.
   ci-health:
     needs: [required]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/ci-health.yml
     permissions:
       actions: read
-      contents: read
       issues: write
       pull-requests: read

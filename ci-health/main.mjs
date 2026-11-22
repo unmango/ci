@@ -49,11 +49,15 @@ const github = {
 		return commits.map(c => ({ sha: c.sha, date: c.commit.committer.date }));
 	},
 	async requiredRun(repo, sha) {
-		const { check_runs } = await api(
-			tokenFor(repo),
-			`/repos/${repo}/commits/${sha}/check-runs?filter=latest&app_id=${ACTIONS_APP}&per_page=100`,
-		);
-		const gate = requiredGate(check_runs);
+		let gate = null;
+		for (let page = 1; !gate; page++) {
+			const { check_runs } = await api(
+				tokenFor(repo),
+				`/repos/${repo}/commits/${sha}/check-runs?filter=latest&app_id=${ACTIONS_APP}&per_page=100&page=${page}`,
+			);
+			gate = requiredGate(check_runs);
+			if (check_runs.length < 100) break;
+		}
 		if (!gate?.workflowRun) return null;
 		// The gate only aggregates. Timing from the latest attempt's start leaves out the gap before a rerun.
 		const { run_started_at } = await api(tokenFor(repo), `/repos/${repo}/actions/runs/${gate.workflowRun}`);

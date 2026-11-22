@@ -89,6 +89,12 @@ test('olderCommitsMatter until the window is covered and the streak is resolved'
 	assert.equal(olderCommitsMatter([commit(1, 'failure'), commit(24 * 8, 'failure'), commit(24 * 9, 'success')], now), false);
 });
 
+test('olderCommitsMatter looks past uncounted runs for a while', () => {
+	const cancelled = commit(24 * 8, 'cancelled');
+	assert.equal(olderCommitsMatter([cancelled], now), true);
+	assert.equal(olderCommitsMatter(Array(30).fill(cancelled), now), false);
+});
+
 const report = (repo, overrides = {}) => ({
 	repo,
 	state: 'green',

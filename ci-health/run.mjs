@@ -13,7 +13,13 @@ async function report(repo, { github, now }) {
 				commits.push({ date, run: await github.requiredRun(repo, sha) });
 			}
 		}
-		return { repo, ...summarize(commits, now), needsHuman: await github.needsHuman(repo), error: null };
+		const summary = { repo, ...summarize(commits, now), needsHuman: 0, error: null };
+		try {
+			summary.needsHuman = await github.needsHuman(repo);
+		} catch (err) {
+			summary.error = err.message;
+		}
+		return summary;
 	} catch (err) {
 		return { repo, ...summarize([], now), needsHuman: 0, error: err.message };
 	}

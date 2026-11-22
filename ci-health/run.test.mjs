@@ -151,6 +151,18 @@ test('a repo that cannot be read is reported and fails the run', async () => {
 	assert.match(body, /unmango\/pkgs.*green/);
 });
 
+test('a failed needs-human query still pages', async () => {
+	const github = fakeGitHub({ 'UnstoppableMango/tdl': [[30, 'failure'], [24 * 8, 'success']] });
+	github.needsHuman = async () => {
+		throw new Error('HTTP 502');
+	};
+	const ntfy = fakeNtfy();
+	const result = await run(['UnstoppableMango/tdl'], opts(github, ntfy));
+	assert.equal(ntfy.pages.length, 1);
+	assert.equal(result.failed, true);
+	assert.match(github.calls.find(c => c[0] === 'createIssue')[2], /HTTP 502/);
+});
+
 test('a failed page fails the run but still writes the issue', async () => {
 	const github = fakeGitHub({ 'UnstoppableMango/tdl': [[30, 'failure'], [24 * 8, 'success']] });
 	const ntfy = { page: async () => { throw new Error('ntfy down'); } };

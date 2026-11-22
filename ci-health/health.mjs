@@ -2,6 +2,7 @@ const HOUR = 3600_000;
 const WINDOW = 7 * 24 * HOUR;
 const PAGE_AFTER = 24 * HOUR;
 const SLOW_P50 = 5 * 60;
+const UNCOUNTED_LIMIT = 30;
 
 const RED = new Set(['failure', 'timed_out', 'startup_failure']);
 const GREEN = new Set(['success', 'neutral']);
@@ -54,6 +55,7 @@ export function olderCommitsMatter(commits, now) {
 	const oldest = commits.at(-1);
 	if (!oldest || now - new Date(oldest.date) <= WINDOW) return true;
 	const { state, resolved } = streak(commits);
+	if (state === 'none') return commits.length < UNCOUNTED_LIMIT;
 	return state === 'red' && !resolved;
 }
 
@@ -80,10 +82,12 @@ const needsHumanUrl = repo =>
 	`${repoUrl(repo)}/pulls?q=${encodeURIComponent(`is:pr is:open label:${NEEDS_HUMAN}`).replaceAll('%20', '+')}`;
 
 function mainCell(r, now) {
-	if (r.error) return `⚠️ ${r.error}`;
-	if (r.state === 'none') return 'no `required` check';
-	if (r.state === 'red') return `❌ red for ${age(r.redSince, now)}`;
-	return '✅ green';
+	const state = {
+		red: () => `❌ red for ${age(r.redSince, now)}`,
+		green: () => '✅ green',
+		none: () => (r.error ? '' : 'no `required` check'),
+	}[r.state]();
+	return r.error ? `${state} ⚠️ ${r.error}`.trim() : state;
 }
 
 const slow = r => r.p50 != null && r.p50 > SLOW_P50;
@@ -96,7 +100,7 @@ export function issueBody(reports, now, runUrl) {
 			r.error ? '–' : r.needsHuman ? `[${r.needsHuman}](${needsHumanUrl(r.repo)})` : '0',
 			slow(r) ? `⚠️ ${duration(r.p50)}` : duration(r.p50),
 			duration(r.p90),
-			r.error ? '–' : String(r.samples),
+			String(r.samples),
 		].join(' | ')
 	);
 	return [

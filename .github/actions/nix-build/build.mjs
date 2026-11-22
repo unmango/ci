@@ -36,7 +36,8 @@ export async function run({ exec, core, inputs, push }) {
   });
   let failed = 0;
   for (const [cmd, args] of cmds) {
-    if ((await exec.exec(cmd, args, { ignoreReturnCode: true })) !== 0) failed++;
+    const code = await exec.exec(cmd, args, { ignoreReturnCode: true });
+    if (code !== 0) failed++;
   }
   if (failed > 0) core.setFailed(`${failed} of ${cmds.length} builds failed`);
 }

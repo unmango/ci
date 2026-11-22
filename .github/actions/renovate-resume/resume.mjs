@@ -86,7 +86,8 @@ export async function previousRequiredFailed({ github, repo, before, checkName, 
   const { data: commits } = await github.request("GET /repos/{owner}/{repo}/commits", { ...repo, sha: before, per_page: depth });
   for (const { sha } of /** @type {{ sha: string }[]} */ (commits)) {
     // A scheduled run's required is skipped, and a cancelled one never finished.
-    const finished = (await runsFor({ github, repo, sha, checkName, appId })).filter((r) => r.conclusion === "success" || failed(r));
+    const runs = await runsFor({ github, repo, sha, checkName, appId });
+    const finished = runs.filter((r) => r.conclusion === "success" || failed(r));
     const latest = latestRun(finished, { completed: true });
     if (latest) return failed(latest);
   }

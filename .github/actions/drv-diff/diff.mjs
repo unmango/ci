@@ -33,7 +33,7 @@ export const RUNNERS = {
 const cause = (error) => {
   const plain = error?.replace(/\x1b\[[0-9;]*m/g, "");
   return plain
-    ?.slice(plain.lastIndexOf("error:"))
+    ?.slice(Math.max(plain.lastIndexOf("error:"), 0))
     .trim()
     .replace(/\/nix\/store\/[0-9a-z]{32}-/g, "/nix/store/");
 };

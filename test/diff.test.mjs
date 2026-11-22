@@ -91,6 +91,8 @@ test("errors differing only in their trace count as the same", () => {
   assert.deepEqual(p.errors, []);
   const q = plan([broken("packages", "x86_64-linux", "d", "error: new")], [broken("packages", "x86_64-linux", "d", "error: old")]);
   assert.equal(q.errors.length, 1);
+  const r = plan([broken("packages", "x86_64-linux", "d", "missing 'foo'")], [broken("packages", "x86_64-linux", "d", "missing 'bar'")]);
+  assert.equal(r.errors.length, 1);
 });
 
 test("with no base every eval error is reported", () => {

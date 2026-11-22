@@ -64,10 +64,60 @@ Every hosted job reads Cachix; only a push to `main` gets the token.
 `renovate-resume` runs on a push to `main` once `gate` passes, and its failure never fails the call.
 When the previous completed `required` run on `main` failed or timed out, it ticks the rebase checkbox on every open `renovate/` PR whose latest `required` run failed and that isn't labelled `renovate:needs-human`.
 
+## `ci-health.yml`
+
+Keeps one pinned "CI health" issue, labelled `ci-health`, in the calling repo, for the aggregator in [UnstoppableMango/nix](https://github.com/UnstoppableMango/nix) to read.
+Call it from its own workflow, which runs once `CI` finishes on `main` and once a day, so `ci.yml` needs no change:
+
+```yaml
+name: CI health
+
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  ci-health:
+    if: github.event_name == 'schedule' || github.event.workflow_run.event == 'push'
+    uses: unmango/ci/.github/workflows/ci-health.yml@<sha> # <version>
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: read
+```
+
+The `if` keeps out a fork PR whose branch is also named `main`, which `branches` alone would let through.
+The `workflow` input names the file holding `required`, `ci.yml` by default.
+
+Each run reads the caller's workflow runs on pushes to the default branch and the `required` job in each:
+
+- the latest `required` result, green or red;
+- p50 and p90 over the last 7 days, timed from the run's start to `required` finishing, flagging a p50 over 5 minutes;
+- open PRs labelled `renovate:needs-human`.
+
+On a `workflow_run` or a schedule it rewrites the issue's body, creating and pinning the issue if there is none, with the caller's `GITHUB_TOKEN`.
+On a PR it only writes the report to the job summary.
+While `main` is red the issue carries `ci-health:red`, which comes off once it is green.
+The body's first line is machine-readable, with `red_since` the creation time of the first run in the red streak:
+
+```html
+<!-- ci-health {"state":"red","red_since":"2026-11-20T09:00:00Z","p50":270,"p90":420} -->
+```
+
+`state` is `green`, `red`, or `unknown`; `p50` and `p90` are seconds, or `null` with no runs in the window.
+Cancelled runs count toward neither the state nor the percentiles, and `unknown` leaves the label as it was.
+
 ## Development
 
 Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
-`nix-ci.yml` uses the actions through `$/`, so they come from the same commit.
+`nix-ci.yml` and `ci-health.yml` use the actions through `$/`, so they come from the same commit.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.
+`health.yml` calls `ci-health.yml` for this repo's own issue, and also on PRs, where it writes only the job summary.

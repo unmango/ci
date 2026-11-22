@@ -1,0 +1,38 @@
+name: CI health
+description: Keep the repo's pinned ci-health issue reporting its required gate on the default branch.
+
+inputs:
+  token:
+    description: Token with actions:read, issues:write and pull-requests:read on the repository.
+    default: ${{ github.token }}
+  repository:
+    description: owner/repo to report on.
+    default: ${{ github.repository }}
+  workflow:
+    description: Workflow file holding the required job.
+    default: ci.yml
+  run-url:
+    description: Link to this run, written into the issue.
+    default: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  write:
+    description: Write the issue; otherwise only the job summary.
+    default: "true"
+
+outputs:
+  state:
+    description: green, red, or unknown.
+    value: ${{ steps.health.outputs.state }}
+
+runs:
+  using: composite
+  steps:
+    - id: health
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUTS: ${{ toJSON(inputs) }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = await import(`${process.env.ACTION_PATH}/health.mjs`);
+          await run({ github, core, inputs: JSON.parse(process.env.INPUTS) });

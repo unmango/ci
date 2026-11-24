@@ -4,21 +4,29 @@ import { previousRequiredFailed } from "../renovate-resume/resume.mjs";
 
 /**
  * @typedef {object} FileChanges createCommitOnBranch's file changes, before contents are read.
- * @property {string[]} additions Paths added or modified.
+ * @property {{ path: string, blob: string }[]} additions Paths added or modified, with their staged blob.
  * @property {string[]} deletions Paths deleted.
+ * @property {string[]} refused Paths that aren't regular files, or that the App can't write.
  */
 
+const REGULAR = new Set(["100644", "100755"]);
+
 /**
- * @param {string} nameStatus `git diff --name-status -z --no-renames` output.
+ * @param {string} raw `git diff --cached --raw -z --no-renames` output.
  * @returns {FileChanges}
  */
-export function fileChanges(nameStatus) {
-  const fields = nameStatus.split("\0").filter((f) => f !== "");
+export function fileChanges(raw) {
+  const fields = raw.split("\0").filter((f) => f !== "");
   /** @type {FileChanges} */
-  const changes = { additions: [], deletions: [] };
+  const changes = { additions: [], deletions: [], refused: [] };
   for (let i = 0; i + 1 < fields.length; i += 2) {
-    const [status, path] = [fields[i], fields[i + 1]];
-    (status === "D" ? changes.deletions : changes.additions).push(path);
+    const [, newMode, , blob, status] = fields[i].split(" ");
+    const path = fields[i + 1];
+    if (path.startsWith(".github/workflows/")) changes.refused.push(path);
+    else if (status === "D") changes.deletions.push(path);
+    // A symlink would make the read follow it off the tree.
+    else if (!REGULAR.has(newMode)) changes.refused.push(path);
+    else changes.additions.push({ path, blob });
   }
   return changes;
 }
@@ -29,8 +37,9 @@ mutation($input: CreateCommitOnBranchInput!) {
 }`;
 
 /**
- * Commits the applied patch through the API, so the commit is signed, and only
- * if the branch still points at `expectedHeadOid`.
+ * Commits the staged changes through the API, so the commit is signed, and only
+ * if the branch still points at `expectedHeadOid`. Contents come from the
+ * index's blobs, never the work tree, which the patch wrote.
  *
  * @param {object} opts
  * @param {Octokit} opts.github
@@ -39,27 +48,26 @@ mutation($input: CreateCommitOnBranchInput!) {
  * @param {string} opts.branch
  * @param {string} opts.expectedHeadOid
  * @param {string} opts.message
- * @param {(path: string) => Promise<string>} [opts.read] A file's contents, base64-encoded.
- * @returns {Promise<string | null>} The new commit's oid, or null when there is nothing to commit.
+ * @returns {Promise<{ oid: string | null, refused: string[] }>} The new commit, or null when nothing was committed.
  */
-export async function push({ github, exec, repo, branch, expectedHeadOid, message, read }) {
-  const { stdout } = await exec.getExecOutput("git", ["diff", "--cached", "--name-status", "-z", "--no-renames", expectedHeadOid], {
-    silent: true,
-  });
-  const { additions, deletions } = fileChanges(stdout);
-  if (additions.length === 0 && deletions.length === 0) return null;
-  const base64 = read ?? (async (/** @type {string} */ path) => (await exec.getExecOutput("base64", ["-w0", "--", path], { silent: true })).stdout);
+export async function push({ github, exec, repo, branch, expectedHeadOid, message }) {
+  const { stdout } = await exec.getExecOutput("git", ["diff", "--cached", "--raw", "-z", "--no-renames", expectedHeadOid], { silent: true });
+  const { additions, deletions, refused } = fileChanges(stdout);
+  if (refused.length > 0) return { oid: null, refused };
+  if (additions.length === 0 && deletions.length === 0) return { oid: null, refused };
+  /** @type {(blob: string) => Promise<string>} */
+  const base64 = async (blob) => (await exec.getExecOutput("bash", ["-c", 'git cat-file blob "$1" | base64 -w0', "read", blob], { silent: true })).stdout;
   const input = {
     branch: { repositoryNameWithOwner: `${repo.owner}/${repo.repo}`, branchName: branch },
     expectedHeadOid,
     message: { headline: message },
     fileChanges: {
-      additions: await Promise.all(additions.map(async (path) => ({ path, contents: await base64(path) }))),
+      additions: await Promise.all(additions.map(async ({ path, blob }) => ({ path, contents: await base64(blob) }))),
       deletions: deletions.map((path) => ({ path })),
     },
   };
   const result = await github.graphql(CREATE_COMMIT, { input });
-  return result.createCommitOnBranch.commit.oid;
+  return { oid: result.createCommitOnBranch.commit.oid, refused };
 }
 
 /**
@@ -78,7 +86,7 @@ export async function push({ github, exec, repo, branch, expectedHeadOid, messag
  * @param {(message: string) => void} opts.log
  * @returns {Promise<number | null>} The PR labelled.
  */
-export async function label({ github, repo, branch, defaultBranch, label, checkName, appId, depth, log }) {
+export async function labelFailed({ github, repo, branch, defaultBranch, label, checkName, appId, depth, log }) {
   if (await previousRequiredFailed({ github, repo, before: defaultBranch, checkName, appId, depth })) {
     log(`${defaultBranch} is red; leaving ${label} off`);
     return null;
@@ -105,7 +113,7 @@ export async function label({ github, repo, branch, defaultBranch, label, checkN
 export async function run({ github, exec, core, inputs }) {
   const [owner, repo] = inputs.repository.split("/");
   if (inputs.step === "push") {
-    const oid = await push({
+    const { oid, refused } = await push({
       github,
       exec,
       repo: { owner, repo },
@@ -113,10 +121,15 @@ export async function run({ github, exec, core, inputs }) {
       expectedHeadOid: inputs.sha,
       message: inputs.message,
     });
-    core.info(oid ? `pushed ${oid} to ${inputs.branch}` : "nothing to push");
     core.setOutput("oid", oid ?? "");
+    if (refused.length > 0) {
+      core.setOutput("refused", "true");
+      core.setFailed(`refused to push symlinks, submodules or workflows: ${refused.join(", ")}`);
+      return;
+    }
+    core.info(oid ? `pushed ${oid} to ${inputs.branch}` : "nothing to push");
   } else if (inputs.step === "label") {
-    const pr = await label({
+    const pr = await labelFailed({
       github,
       repo: { owner, repo },
       branch: inputs.branch,

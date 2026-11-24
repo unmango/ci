@@ -1,13 +1,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fileChanges, push, label } from "../.github/actions/renovate-fixup/fixup.mjs";
+import { fileChanges, push, labelFailed } from "../.github/actions/renovate-fixup/fixup.mjs";
 
-test("fileChanges splits additions from deletions", () => {
-  assert.deepEqual(fileChanges("M\0gomod2nix.toml\0A\0new file.json\0D\0old.json\0"), {
-    additions: ["gomod2nix.toml", "new file.json"],
-    deletions: ["old.json"],
-  });
-  assert.deepEqual(fileChanges(""), { additions: [], deletions: [] });
+const raw = (...entries) => entries.map(([meta, path]) => `${meta}\0${path}\0`).join("");
+
+test("fileChanges reads staged blobs, deletions and refusals", () => {
+  assert.deepEqual(
+    fileChanges(
+      raw(
+        [":100644 100644 o1 n1 M", "gomod2nix.toml"],
+        [":000000 100755 o2 n2 A", "new file.sh"],
+        [":100644 000000 o3 n3 D", "old.json"],
+        [":000000 120000 o4 n4 A", "link"],
+        [":000000 160000 o5 n5 A", "sub"],
+        [":100644 100644 o6 n6 M", ".github/workflows/ci.yml"],
+      ),
+    ),
+    {
+      additions: [
+        { path: "gomod2nix.toml", blob: "n1" },
+        { path: "new file.sh", blob: "n2" },
+      ],
+      deletions: ["old.json"],
+      refused: ["link", "sub", ".github/workflows/ci.yml"],
+    },
+  );
+  assert.deepEqual(fileChanges(""), { additions: [], deletions: [], refused: [] });
 });
 
 const repo = { owner: "o", repo: "r" };
@@ -18,14 +36,18 @@ function fakeExec(stdout) {
       throw new Error("unexpected");
     },
     async getExecOutput(cmd, args) {
-      assert.equal(cmd, "git");
-      assert.deepEqual(args, ["diff", "--cached", "--name-status", "-z", "--no-renames", "base"]);
-      return { exitCode: 0, stdout, stderr: "" };
+      if (cmd === "git") {
+        assert.deepEqual(args, ["diff", "--cached", "--raw", "-z", "--no-renames", "base"]);
+        return { exitCode: 0, stdout, stderr: "" };
+      }
+      assert.equal(cmd, "bash");
+      assert.equal(args[1], 'git cat-file blob "$1" | base64 -w0');
+      return { exitCode: 0, stdout: `base64 of ${args[3]}`, stderr: "" };
     },
   };
 }
 
-test("push commits the staged changes against the expected head", async () => {
+test("push commits the staged blobs against the expected head", async () => {
   const calls = [];
   const github = {
     async graphql(query, variables) {
@@ -33,36 +55,47 @@ test("push commits the staged changes against the expected head", async () => {
       return { createCommitOnBranch: { commit: { oid: "new" } } };
     },
   };
-  const oid = await push({
+  const result = await push({
     github,
-    exec: fakeExec("M\0a.toml\0D\0b.json\0"),
+    exec: fakeExec(raw([":100644 100644 o1 n1 M", "a.toml"], [":100644 000000 o2 n2 D", "b.json"])),
     repo,
     branch: "renovate/x",
     expectedHeadOid: "base",
     message: "fixup",
-    read: async (p) => `base64 of ${p}`,
   });
-  assert.equal(oid, "new");
+  assert.deepEqual(result, { oid: "new", refused: [] });
   assert.deepEqual(calls, [
     {
       branch: { repositoryNameWithOwner: "o/r", branchName: "renovate/x" },
       expectedHeadOid: "base",
       message: { headline: "fixup" },
       fileChanges: {
-        additions: [{ path: "a.toml", contents: "base64 of a.toml" }],
+        additions: [{ path: "a.toml", contents: "base64 of n1" }],
         deletions: [{ path: "b.json" }],
       },
     },
   ]);
 });
 
+const noGraphql = {
+  async graphql() {
+    throw new Error("unexpected");
+  },
+};
+
 test("push commits nothing without changes", async () => {
-  const github = {
-    async graphql() {
-      throw new Error("unexpected");
-    },
-  };
-  assert.equal(await push({ github, exec: fakeExec(""), repo, branch: "b", expectedHeadOid: "base", message: "m" }), null);
+  assert.deepEqual(await push({ github: noGraphql, exec: fakeExec(""), repo, branch: "b", expectedHeadOid: "base", message: "m" }), {
+    oid: null,
+    refused: [],
+  });
+});
+
+test("push commits nothing when a change is refused", async () => {
+  const exec = fakeExec(raw([":100644 100644 o1 n1 M", "a.toml"], [":000000 120000 o2 n2 A", "leak"]));
+  assert.deepEqual(await push({ github: noGraphql, exec, repo, branch: "b", expectedHeadOid: "base", message: "m" }), {
+    oid: null,
+    refused: ["leak"],
+  });
 });
 
 const checkRun = (conclusion) => ({ id: 1, status: "completed", conclusion, started_at: "2026-01-01T00:00:00Z" });
@@ -95,25 +128,25 @@ function fakeApi({ main, prs }) {
 
 const opts = { repo, branch: "renovate/x", defaultBranch: "main", label: "renovate:needs-human", checkName: "required", appId: 15368, depth: 5, log() {} };
 
-test("label labels the PR while main is green", async () => {
+test("labelFailed labels the PR while main is green", async () => {
   const github = fakeApi({ main: "success", prs: [{ number: 7 }] });
-  assert.equal(await label({ github, ...opts }), 7);
+  assert.equal(await labelFailed({ github, ...opts }), 7);
   assert.deepEqual(github.labelled, [[7, ["renovate:needs-human"]]]);
 });
 
-test("label labels when main has no finished required run", async () => {
+test("labelFailed labels when main has no finished required run", async () => {
   const github = fakeApi({ main: null, prs: [{ number: 7 }] });
-  assert.equal(await label({ github, ...opts }), 7);
+  assert.equal(await labelFailed({ github, ...opts }), 7);
 });
 
-test("label leaves the label off while main is red", async () => {
+test("labelFailed leaves the label off while main is red", async () => {
   const github = fakeApi({ main: "failure", prs: [{ number: 7 }] });
-  assert.equal(await label({ github, ...opts }), null);
+  assert.equal(await labelFailed({ github, ...opts }), null);
   assert.deepEqual(github.labelled, []);
 });
 
-test("label does nothing without a PR", async () => {
+test("labelFailed does nothing without a PR", async () => {
   const github = fakeApi({ main: "success", prs: [] });
-  assert.equal(await label({ github, ...opts }), null);
+  assert.equal(await labelFailed({ github, ...opts }), null);
   assert.deepEqual(github.labelled, []);
 });

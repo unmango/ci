@@ -157,15 +157,17 @@ jobs:
 
 - `fixup` runs `nix run .#renovate-fixup`, the steps the repo lists in `perSystem.ci.fixup.steps`, with a read-only token, and uploads what changed as a patch.
 - `push` runs only when the patch isn't empty and runs nothing from the branch.
-  It mints a token for the `renovate-fixup` App, limited to `contents: write` on this repo, applies the patch, and commits it through `createCommitOnBranch`, so the commit is signed.
-  The commit is refused if the branch moved since the fixup ran; Renovate's newer push starts a new run.
-  Changes under `.github/workflows/` are refused too, since the App can't write workflows.
-- `label` runs when `fixup` failed and adds `renovate:needs-human` to the branch's PR with `GITHUB_TOKEN`, unless the last finished `required` run on the default branch failed.
+  It applies the patch, then mints a token for the `renovate-fixup` App, limited to `contents: write` on this repo, and commits the staged blobs through `createCommitOnBranch`, so the commit is signed.
+  It refuses symlinks, submodules and anything under `.github/workflows/`, since a symlink's read would leave the tree and the App can't write workflows.
+  GitHub refuses the commit if the branch moved since the fixup ran; Renovate's newer push starts a new run.
+- `label` adds `renovate:needs-human` to the branch's PR with `GITHUB_TOKEN` when `nix run .#renovate-fixup` failed or `push` refused the patch, unless the last finished `required` run on the default branch failed.
   Then `renovate-resume` brings the PR back once `main` is green.
+  A failure before the fixup step, such as installing Nix, labels nothing, since a labelled PR never retries.
 
 Pushes by the App itself, `unmango-renovate-fixup[bot]` unless `app-slug` says otherwise, are skipped, so a fixup never triggers another.
 Its push does trigger the repo's other workflows, which a `GITHUB_TOKEN` push wouldn't.
 `createCommitOnBranch` takes no file mode, so a fixup can't make a file executable.
+`fixup` gets the read-only `GITHUB_TOKEN`, for fetching flake inputs from GitHub.
 
 ## `ci-health.yml`
 
@@ -221,7 +223,7 @@ Cancelled runs count toward neither the state nor the percentiles, and `unknown`
 
 Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
 The workflows use the actions through `$/`, so they come from the same commit.
-`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, and `nix-build` runs `nix build`, both through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
+`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, `nix-build` runs `nix build`, and `renovate-fixup` reads staged blobs, all through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.

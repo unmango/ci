@@ -40,6 +40,9 @@ outputs:
   oid:
     description: The fixup commit pushed, or empty.
     value: ${{ steps.fixup.outputs.oid }}
+  refused:
+    description: "true when push refused a symlink, submodule or workflow change."
+    value: ${{ steps.fixup.outputs.refused }}
   pr:
     description: The PR labelled, or empty.
     value: ${{ steps.fixup.outputs.pr }}

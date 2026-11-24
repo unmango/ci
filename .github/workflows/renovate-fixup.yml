@@ -26,6 +26,7 @@ jobs:
       contents: read
     outputs:
       changed: ${{ steps.diff.outputs.changed }}
+      failed: ${{ steps.fixup.outcome == 'failure' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,7 +34,8 @@ jobs:
       - uses: unmango/actions/setup-nix@e8bbcbd12a2c521c5cb36957c00a7a8f4fe2e766 # v2.0.0
         with:
           github_access_token: ${{ github.token }}
-      - run: nix run .#renovate-fixup
+      - id: fixup
+        run: nix run .#renovate-fixup
       - id: diff
         run: |
           git add --all
@@ -53,14 +55,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      refused: ${{ steps.push.outputs.refused }}
     steps:
-      - id: app-token
-        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
-        with:
-          client-id: ${{ inputs.client-id }}
-          private-key: ${{ secrets.RENOVATE_FIXUP_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -69,14 +66,25 @@ jobs:
           name: renovate-fixup
           path: ${{ runner.temp }}
       - run: git apply --index "$RUNNER_TEMP/fixup.patch"
-      - uses: $/.github/actions/renovate-fixup
+      # Minted once the patch is applied, and only the index is read after.
+      - id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ inputs.client-id }}
+          private-key: ${{ secrets.RENOVATE_FIXUP_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      - id: push
+        uses: $/.github/actions/renovate-fixup
         with:
           step: push
           token: ${{ steps.app-token.outputs.token }}
 
+  # Not on a setup failure, since a labelled PR never retries, nor when the
+  # push fails because Renovate moved the branch, which starts a new run.
   label:
-    needs: [fixup]
-    if: failure() && needs.fixup.result == 'failure'
+    needs: [fixup, push]
+    if: always() && (needs.fixup.outputs.failed == 'true' || needs.push.outputs.refused == 'true')
     runs-on: ubuntu-latest
     permissions:
       checks: read

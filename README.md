@@ -124,6 +124,49 @@ They are read back from `herculesCI`, against the first of its `ciSystems`.
 
 `renovate-resume` runs on a push to `main` once every build passed, as in `nix-ci.yml`.
 
+## `renovate-fixup.yml`
+
+Refreshes what a Renovate update leaves stale and pushes it back to the Renovate branch, for repos that import `flakeModules.ci` from [UnstoppableMango/nix](https://github.com/UnstoppableMango/nix).
+Call it from its own workflow on pushes to Renovate's branches:
+
+```yaml
+name: Renovate fixup
+
+on:
+  push:
+    branches: ["renovate/**"]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixup:
+    uses: unmango/ci/.github/workflows/renovate-fixup.yml@<sha> # <version>
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+    with:
+      client-id: ${{ vars.RENOVATE_FIXUP_APP_CLIENT_ID }}
+    secrets:
+      RENOVATE_FIXUP_APP_PRIVATE_KEY: ${{ secrets.RENOVATE_FIXUP_APP_PRIVATE_KEY }}
+```
+
+- `fixup` runs `nix run .#renovate-fixup`, the steps the repo lists in `perSystem.ci.fixup.steps`, with a read-only token, and uploads what changed as a patch.
+- `push` runs only when the patch isn't empty and runs nothing from the branch.
+  It mints a token for the `renovate-fixup` App, limited to `contents: write` on this repo, applies the patch, and commits it through `createCommitOnBranch`, so the commit is signed.
+  The commit is refused if the branch moved since the fixup ran; Renovate's newer push starts a new run.
+  Changes under `.github/workflows/` are refused too, since the App can't write workflows.
+- `label` runs when `fixup` failed and adds `renovate:needs-human` to the branch's PR with `GITHUB_TOKEN`, unless the last finished `required` run on the default branch failed.
+  Then `renovate-resume` brings the PR back once `main` is green.
+
+Pushes by the App itself, `unmango-renovate-fixup[bot]` unless `app-slug` says otherwise, are skipped, so a fixup never triggers another.
+Its push does trigger the repo's other workflows, which a `GITHUB_TOKEN` push wouldn't.
+`createCommitOnBranch` takes no file mode, so a fixup can't make a file executable.
+
 ## `ci-health.yml`
 
 Keeps one pinned "CI health" issue, labelled `ci-health`, in the calling repo, for the aggregator in [UnstoppableMango/nix](https://github.com/UnstoppableMango/nix) to read.

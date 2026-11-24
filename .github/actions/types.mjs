@@ -19,7 +19,7 @@
 /**
  * @typedef {object} Exec
  * @property {(cmd: string, args?: string[], opts?: { ignoreReturnCode?: boolean }) => Promise<number>} exec
- * @property {(cmd: string, args?: string[], opts?: { ignoreReturnCode?: boolean, silent?: boolean }) => Promise<{ exitCode: number, stdout: string, stderr: string }>} getExecOutput
+ * @property {(cmd: string, args?: string[], opts?: { ignoreReturnCode?: boolean, silent?: boolean, env?: Record<string, string> }) => Promise<{ exitCode: number, stdout: string, stderr: string }>} getExecOutput
  */
 
 /** @typedef {{ eventName: string, payload: any }} Context */

@@ -1,0 +1,76 @@
+name: Package updates
+
+on:
+  workflow_call:
+    inputs:
+      list:
+        description: Shell command printing one package name per line.
+        type: string
+        required: true
+      bump:
+        description: Shell command bumping the package whose name is appended to it; see the README for its exit codes.
+        type: string
+        required: true
+      min-release-age-days:
+        description: Passed to both commands as MIN_RELEASE_AGE_DAYS.
+        type: number
+        default: 3
+      package-timeout-minutes:
+        description: How long one package's bump may run before it counts as a failure.
+        type: number
+        default: 60
+      dry-run:
+        description: Bump everything, then write nothing.
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  # Runs nix-update and builds upstream code, so it holds no token that can write.
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    outputs:
+      failures: ${{ steps.bump.outputs.failures }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: unmango/actions/setup-nix@e8bbcbd12a2c521c5cb36957c00a7a8f4fe2e766 # v2.0.0
+        with:
+          github_access_token: ${{ github.token }}
+          extra_nix_config: |
+            min-free = 3221225472
+            max-free = 10737418240
+      - run: mkdir -p "$RUNNER_TEMP/package-updates"
+      - id: bump
+        uses: $/.github/actions/package-updates
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MIN_RELEASE_AGE_DAYS: ${{ inputs.min-release-age-days }}
+        with:
+          step: bump
+          list: ${{ inputs.list }}
+          bump: ${{ inputs.bump }}
+          timeout: ${{ inputs.package-timeout-minutes }}m
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-updates
+          path: ${{ runner.temp }}/package-updates
+          if-no-files-found: ignore
+          retention-days: 1
+
+  report:
+    needs: [bump]
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: $/.github/actions/package-updates
+        with:
+          step: report
+          failures: ${{ needs.bump.outputs.failures }}
+          dry-run: ${{ inputs.dry-run }}

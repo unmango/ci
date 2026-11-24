@@ -1,0 +1,53 @@
+name: Package updates
+description: Bump each listed package and report failures in a pinned issue.
+
+inputs:
+  step:
+    description: bump, to run the repo's commands with no write token, or report, to rewrite the failures issue.
+    required: true
+  token:
+    description: For report, a token with issues:write.
+    default: ${{ github.token }}
+  repository:
+    description: owner/repo to act on.
+    default: ${{ github.repository }}
+  list:
+    description: For bump, a shell command printing one package name per line.
+  bump:
+    description: For bump, a shell command bumping the package whose name is appended to it.
+  timeout:
+    description: For bump, how long one package's bump may run, as `timeout` reads it.
+    default: 60m
+  dir:
+    description: Directory holding one <name>.patch per bump.
+    default: ${{ runner.temp }}/package-updates
+  failures:
+    description: For report, bump's failures output.
+  run-url:
+    description: Link to this run, written into the issue.
+    default: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  dry-run:
+    description: Log what report would write, and write nothing.
+    default: "false"
+
+outputs:
+  results:
+    description: JSON array of each package's result.
+    value: ${{ steps.updates.outputs.results }}
+  failures:
+    description: JSON array of the packages that failed.
+    value: ${{ steps.updates.outputs.failures }}
+
+runs:
+  using: composite
+  steps:
+    - id: updates
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUTS: ${{ toJSON(inputs) }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = await import(`${process.env.ACTION_PATH}/updates.mjs`);
+          await run({ github, exec, core, inputs: JSON.parse(process.env.INPUTS) });

@@ -17,9 +17,6 @@ inputs:
   sha:
     description: The commit the fixup ran on; push refuses to commit if the branch has moved.
     default: ${{ github.sha }}
-  message:
-    description: The fixup commit's message.
-    default: "chore(deps): renovate fixup"
   default-branch:
     description: Branch whose required result decides whether to label.
     default: ${{ github.event.repository.default_branch }}
@@ -32,9 +29,6 @@ inputs:
   app-id:
     description: App that must have created the check run (15368 is GitHub Actions).
     default: "15368"
-  depth:
-    description: How many default-branch commits to search for the last finished required run.
-    default: "20"
 
 outputs:
   oid:

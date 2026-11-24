@@ -119,7 +119,7 @@ export async function run({ github, exec, core, inputs }) {
       repo: { owner, repo },
       branch: inputs.branch,
       expectedHeadOid: inputs.sha,
-      message: inputs.message,
+      message: "chore(deps): renovate fixup",
     });
     core.setOutput("oid", oid ?? "");
     if (refused.length > 0) {
@@ -137,7 +137,7 @@ export async function run({ github, exec, core, inputs }) {
       label: inputs.label,
       checkName: inputs["check-name"],
       appId: Number(inputs["app-id"]),
-      depth: Number(inputs.depth),
+      depth: 20,
       log: core.info,
     });
     core.setOutput("pr", pr ?? "");

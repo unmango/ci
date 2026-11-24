@@ -1,12 +1,12 @@
 name: Package updates
-description: Bump each listed package and report failures in a pinned issue.
+description: Bump each listed package, publish one update/<name> branch and PR per bump, and report failures in a pinned issue.
 
 inputs:
   step:
-    description: bump, to run the repo's commands with no write token, or report, to rewrite the failures issue.
+    description: bump, to run the repo's commands with no write token; publish, to push branches and PRs; or report, to rewrite the failures issue.
     required: true
   token:
-    description: For report, a token with issues:write.
+    description: For publish, the package-updates App's token; for report, one with issues:write.
     default: ${{ github.token }}
   repository:
     description: owner/repo to act on.
@@ -21,13 +21,24 @@ inputs:
   dir:
     description: Directory holding one <name>.patch per bump.
     default: ${{ runner.temp }}/package-updates
+  results:
+    description: For publish, bump's results output.
+  base:
+    description: For publish, the commit the bumps ran on.
+    default: ${{ github.sha }}
+  default-branch:
+    description: Branch the PRs merge into.
+    default: ${{ github.event.repository.default_branch }}
+  label:
+    description: Label for a bump that doesn't build.
+    default: renovate:needs-human
   failures:
-    description: For report, bump's failures output.
+    description: For report, publish's failures output.
   run-url:
     description: Link to this run, written into the issue.
     default: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
   dry-run:
-    description: Log what report would write, and write nothing.
+    description: Log what publish and report would write, and write nothing.
     default: "false"
 
 outputs:
@@ -35,7 +46,7 @@ outputs:
     description: JSON array of each package's result.
     value: ${{ steps.updates.outputs.results }}
   failures:
-    description: JSON array of the packages that failed.
+    description: JSON array of the packages that failed to bump or publish.
     value: ${{ steps.updates.outputs.failures }}
 
 runs:

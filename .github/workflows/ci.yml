@@ -53,6 +53,18 @@ jobs:
     secrets:
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
+  # Two fake packages; a dry run writes nothing.
+  package-updates:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/package-updates.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      list: printf 'alpha\nbeta\n'
+      bump: test/fixtures/bump.sh
+      dry-run: true
+
   # Its own context: on Hercules's, the real status would pass the gate.
   spoofed-status:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
@@ -92,7 +104,7 @@ jobs:
           [ "$OUTCOME" = failure ] && [ "$VERDICT" = timeout ] && [ "$IGNORED" -ge 1 ]
 
   required:
-    needs: [nix, hosted, collection, spoofed-status]
+    needs: [nix, hosted, collection, package-updates, spoofed-status]
     # The weekly build reports through ci-health, not the gate.
     if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest

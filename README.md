@@ -169,6 +169,49 @@ Its push does trigger the repo's other workflows, which a `GITHUB_TOKEN` push wo
 `createCommitOnBranch` takes no file mode, so a fixup can't make a file executable.
 `fixup` gets the read-only `GITHUB_TOKEN`, for fetching flake inputs from GitHub.
 
+## `package-updates.yml`
+
+Bumps a package collection's packages to their latest upstream releases, for unmango/pkgs, unmango/pulumipkgs and unmango/kubepkgs.
+Publishing each bump as its own branch and PR is not built yet, so a run only bumps and reports failures.
+The repo supplies two commands:
+
+- `list` prints one package name per line. If it fails, the run fails.
+- `bump` is run once per name, with the name appended, from a clean checkout of the default branch.
+  It edits the tree and builds the result, skipping a release younger than `MIN_RELEASE_AGE_DAYS` where it can read the upstream date.
+  Exit 0 with no change means the package is current; exit 0 with a change is a bump, whose last line of output is the commit and PR title, such as `foo: 1.2.0 -> 1.3.0`; exit 3 with a change is a bump that doesn't build; anything else is a failure.
+
+```yaml
+name: Package updates
+
+on:
+  schedule:
+    # 00:17 UTC Saturday: after 6 PM Friday in Chicago, under CDT or CST.
+    - cron: "17 0 * * 6"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+
+jobs:
+  updates:
+    uses: unmango/ci/.github/workflows/package-updates.yml@<sha> # <version>
+    permissions:
+      contents: read
+      issues: write
+    with:
+      list: nix develop -c ./scripts/update.sh --list
+      bump: nix develop -c ./scripts/update.sh --bump
+```
+
+- `bump` runs the commands with the read-only `GITHUB_TOKEN`, which nix-update also reads, and without the runner's Actions tokens, then uploads each bump's staged diff.
+  A package whose bump runs past `package-timeout-minutes`, 60 by default, counts as a failure.
+- `report` rewrites the pinned "Package update failures" issue with this run's failures, opening it on the first one, with `GITHUB_TOKEN`.
+  A package failure never fails the run.
+
+`dry-run: true` bumps everything and writes no issue; `ci.yml` runs one over two fake packages.
+
 ## `ci-health.yml`
 
 Keeps one pinned "CI health" issue, labelled `ci-health`, in the calling repo, for the aggregator in [UnstoppableMango/nix](https://github.com/UnstoppableMango/nix) to read.
@@ -223,7 +266,7 @@ Cancelled runs count toward neither the state nor the percentiles, and `unknown`
 
 Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
 The workflows use the actions through `$/`, so they come from the same commit.
-`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, `nix-build` runs `nix build`, and `renovate-fixup` reads staged blobs, all through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
+`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, `nix-build` runs `nix build`, and `renovate-fixup` reads staged blobs and `package-updates` runs the repo's commands, all through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.

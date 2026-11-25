@@ -1,0 +1,56 @@
+name: Renovate fixup
+description: Commit an applied fixup patch to a Renovate branch, or label the branch's PR when the fixup failed.
+
+inputs:
+  step:
+    description: push, to commit the staged changes, or label, after a failed fixup.
+    required: true
+  token:
+    description: For push, a token that can write the branch's contents; for label, one with checks:read, contents:read and pull-requests:write.
+    required: true
+  repository:
+    description: owner/repo to act on.
+    default: ${{ github.repository }}
+  branch:
+    description: The Renovate branch.
+    default: ${{ github.ref_name }}
+  sha:
+    description: The commit the fixup ran on; push refuses to commit if the branch has moved.
+    default: ${{ github.sha }}
+  default-branch:
+    description: Branch whose required result decides whether to label.
+    default: ${{ github.event.repository.default_branch }}
+  label:
+    description: Label for a PR whose fixup failed.
+    default: renovate:needs-human
+  check-name:
+    description: Name of the gate's check run.
+    default: required
+  app-id:
+    description: App that must have created the check run (15368 is GitHub Actions).
+    default: "15368"
+
+outputs:
+  oid:
+    description: The fixup commit pushed, or empty.
+    value: ${{ steps.fixup.outputs.oid }}
+  refused:
+    description: "true when push refused a symlink, submodule or workflow change."
+    value: ${{ steps.fixup.outputs.refused }}
+  pr:
+    description: The PR labelled, or empty.
+    value: ${{ steps.fixup.outputs.pr }}
+
+runs:
+  using: composite
+  steps:
+    - id: fixup
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUTS: ${{ toJSON(inputs) }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = await import(`${process.env.ACTION_PATH}/fixup.mjs`);
+          await run({ github, exec, core, inputs: JSON.parse(process.env.INPUTS) });

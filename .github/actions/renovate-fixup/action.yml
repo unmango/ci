@@ -15,7 +15,7 @@ inputs:
     description: The Renovate branch.
     default: ${{ github.ref_name }}
   sha:
-    description: The commit the fixup ran on; push refuses to commit if the branch has moved.
+    description: The commit the fixup ran on; push refuses to commit, and label to label, once the branch has moved.
     default: ${{ github.sha }}
   default-branch:
     description: Branch whose required result decides whether to label.

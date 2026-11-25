@@ -78,6 +78,7 @@ export async function push({ github, exec, repo, branch, expectedHeadOid, messag
  * @param {Octokit} opts.github
  * @param {Repo} opts.repo
  * @param {string} opts.branch
+ * @param {string} opts.sha The commit the fixup failed on.
  * @param {string} opts.defaultBranch
  * @param {string} opts.label
  * @param {string} opts.checkName
@@ -86,18 +87,22 @@ export async function push({ github, exec, repo, branch, expectedHeadOid, messag
  * @param {(message: string) => void} opts.log
  * @returns {Promise<number | null>} The PR labelled.
  */
-export async function labelFailed({ github, repo, branch, defaultBranch, label, checkName, appId, depth, log }) {
+export async function labelFailed({ github, repo, branch, sha, defaultBranch, label, checkName, appId, depth, log }) {
   if (await previousRequiredFailed({ github, repo, before: defaultBranch, checkName, appId, depth })) {
     log(`${defaultBranch} is red; leaving ${label} off`);
     return null;
   }
-  /** @type {{ number: number }[]} */
+  /** @type {{ number: number, head: { sha: string } }[]} */
   const prs = await github.paginate("GET /repos/{owner}/{repo}/pulls", { ...repo, state: "open", head: `${repo.owner}:${branch}`, per_page: 100 });
   if (prs.length === 0) {
     log(`no open PR for ${branch}`);
     return null;
   }
-  const [{ number }] = prs;
+  const [{ number, head }] = prs;
+  if (head.sha !== sha) {
+    log(`#${number}: ${branch} moved past ${sha}; leaving ${label} off`);
+    return null;
+  }
   await github.request("POST /repos/{owner}/{repo}/issues/{issue_number}/labels", { ...repo, issue_number: number, labels: [label] });
   log(`#${number}: labelled ${label}`);
   return number;
@@ -133,6 +138,7 @@ export async function run({ github, exec, core, inputs }) {
       github,
       repo: { owner, repo },
       branch: inputs.branch,
+      sha: inputs.sha,
       defaultBranch: inputs["default-branch"],
       label: inputs.label,
       checkName: inputs["check-name"],

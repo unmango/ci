@@ -2,3 +2,6 @@
 *.local
 .direnv/
 bin/
+node_modules/
+/lib/
+*.res.mjs

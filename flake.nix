@@ -27,8 +27,23 @@
       ];
 
       perSystem =
-        { pkgs, lib, ... }:
         {
+          pkgs,
+          lib,
+          self',
+          ...
+        }:
+        {
+          packages.unmango-ci = pkgs.callPackage ./package.nix { };
+          packages.default = self'.packages.unmango-ci;
+
+          # The actions run the committed bundle, so it must match a fresh build.
+          checks.bundle = pkgs.runCommand "unmango-ci-bundle" { } ''
+            diff ${self'.packages.unmango-ci}/lib/unmango-ci/unmango-ci.mjs ${./dist/unmango-ci.mjs}
+            diff ${self'.packages.unmango-ci}/lib/unmango-ci/unmango-ci.mjs.map ${./dist/unmango-ci.mjs.map}
+            touch $out
+          '';
+
           checks.actions =
             pkgs.runCommand "actions-tests"
               {

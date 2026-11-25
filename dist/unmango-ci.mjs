@@ -1,0 +1,5 @@
+function e(e){let t=e.length,n=0;for(let r=0;r<t;++r)n=n+e[r].length|0;let r=Array(n);n=0;for(let i=0;i<t;++i){let t=e[i];for(let e=0,i=t.length;e<i;++e)r[n]=t[e],n=n+1|0}return r}function t(e,t){let n=t[0];if(n===void 0)return`Missing`;switch(n){case`--help`:case`-h`:case`help`:return`Help`;default:let r=e.find(e=>e.name===n);return r===void 0?{TAG:`Unknown`,_0:n}:{TAG:`Run`,_0:r,_1:t.slice(1)}}}function n(t){return e([[`Usage: unmango-ci <subcommand> [args...]`,``,`Subcommands:`],t.map(e=>`  `+e.name+`  `+e.summary)]).join(`
+`)}let r=[],i=t(r,process.argv.slice(2));typeof i==`object`?i.TAG===`Unknown`?(console.error(`unknown subcommand: `+i._0+`
+
+`+n(r)),process.exitCode=2):await i._0.run(i._1):i===`Help`?console.log(n(r)):(console.error(n(r)),process.exitCode=2);export{r as subcommands};
+//# sourceMappingURL=unmango-ci.mjs.map

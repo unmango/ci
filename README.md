@@ -171,8 +171,7 @@ Its push does trigger the repo's other workflows, which a `GITHUB_TOKEN` push wo
 
 ## `package-updates.yml`
 
-Bumps a package collection's packages to their latest upstream releases, for unmango/pkgs, unmango/pulumipkgs and unmango/kubepkgs.
-Publishing each bump as its own branch and PR is not built yet, so a run only bumps and reports failures.
+Bumps a package collection's packages to their latest upstream releases, one branch and PR per package, for unmango/pkgs, unmango/pulumipkgs and unmango/kubepkgs.
 The repo supplies two commands:
 
 - `list` prints one package name per line. If it fails, the run fails.
@@ -200,17 +199,26 @@ jobs:
     permissions:
       contents: read
       issues: write
+      pull-requests: read
     with:
       list: nix develop -c ./scripts/update.sh --list
       bump: nix develop -c ./scripts/update.sh --bump
+      client-id: ${{ vars.PACKAGE_UPDATES_APP_CLIENT_ID }}
+    secrets:
+      PACKAGE_UPDATES_APP_PRIVATE_KEY: ${{ secrets.PACKAGE_UPDATES_APP_PRIVATE_KEY }}
 ```
 
 - `bump` runs the commands with the read-only `GITHUB_TOKEN`, which nix-update also reads, and without the runner's Actions tokens, then uploads each bump's staged diff.
   A package whose bump runs past `package-timeout-minutes`, 60 by default, counts as a failure.
+- `publish` runs nothing from the bumps.
+  It mints one `package-updates` App token, and for each bump commits the staged blobs through `createCommitOnBranch`, so the commit is signed, and points `update/<name>` at it, force-pushing over an older version.
+  It opens the PR with platform auto-merge on, or retitles the open one, and leaves a PR that already has the version alone.
+  A bump that doesn't build gets `renovate:needs-human`, which a later bump that builds takes off; it isn't listed as a failure.
+  Symlinks, submodules and workflow changes are refused, as in `renovate-fixup.yml`.
 - `report` rewrites the pinned "Package update failures" issue with this run's failures, opening it on the first one, with `GITHUB_TOKEN`.
   A package failure never fails the run.
 
-`dry-run: true` bumps everything and writes no issue; `ci.yml` runs one over two fake packages.
+`dry-run: true` bumps everything and then only logs what it would push, with no App token; `ci.yml` runs one over two fake packages.
 
 ## `ci-health.yml`
 
@@ -266,7 +274,7 @@ Cancelled runs count toward neither the state nor the percentiles, and `unknown`
 
 Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
 The workflows use the actions through `$/`, so they come from the same commit.
-`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, `nix-build` runs `nix build`, and `renovate-fixup` reads staged blobs and `package-updates` runs the repo's commands, all through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
+`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, `nix-build` runs `nix build`, and `renovate-fixup` reads staged blobs and `package-updates` runs the repo's commands and reads staged blobs, all through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.

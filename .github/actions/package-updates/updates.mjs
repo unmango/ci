@@ -1,3 +1,5 @@
+import { fileChanges, push } from "../renovate-fixup/fixup.mjs";
+
 /** @import { Core, Exec, Inputs, Octokit, Repo } from "../types.mjs" */
 
 /**
@@ -117,6 +119,96 @@ export async function bumpAll({ exec, names, bump, dir, timeout, log }) {
   return results;
 }
 
+/**
+ * @typedef {object} PullRequest
+ * @property {number} number
+ * @property {string} node_id
+ * @property {string} title
+ * @property {{ name: string }[]} labels
+ */
+
+/**
+ * Commits one bump on `update/<name>`, reset to `base`, and opens or retitles
+ * its PR, so each package has one branch and one PR.
+ *
+ * @param {object} opts
+ * @param {Octokit} opts.github
+ * @param {Exec} opts.exec
+ * @param {Repo} opts.repo
+ * @param {Result & { title: string }} opts.result
+ * @param {string} opts.base The default branch's commit the bump ran on.
+ * @param {string} opts.defaultBranch
+ * @param {string} opts.patch
+ * @param {string} opts.label For a bump that doesn't build.
+ * @param {boolean} opts.dryRun
+ * @param {(message: string) => void} opts.log
+ */
+export async function publish({ github, exec, repo, result, base, defaultBranch, patch, label, dryRun, log }) {
+  const branch = `update/${result.name}`;
+  /** @type {PullRequest[]} */
+  const prs = await github.paginate("GET /repos/{owner}/{repo}/pulls", { ...repo, state: "open", head: `${repo.owner}:${branch}`, per_page: 100 });
+  const pr = prs[0];
+  if (pr?.title === result.title) {
+    log(`${branch}: #${pr.number} already has ${result.title}`);
+    return;
+  }
+  if (dryRun) {
+    log(`${branch}: would ${pr ? `update #${pr.number}` : "open a PR"} with ${result.title}`);
+    return;
+  }
+
+  await exec.exec("git", ["reset", "--quiet", "--hard", base]);
+  await exec.exec("git", ["apply", "--index", patch]);
+  const staged = await exec.getExecOutput("git", ["diff", "--cached", "--raw", "-z", "--no-renames", base], { silent: true });
+  const { refused } = fileChanges(staged.stdout);
+  if (refused.length > 0) throw new Error(`refused to push symlinks, submodules or workflows: ${refused.join(", ")}`);
+  // Committed on a scratch branch first, so update/<name> never points at
+  // base and its PR never shows an empty diff.
+  const scratch = `${branch}-${base.slice(0, 12)}`;
+  await github.request("POST /repos/{owner}/{repo}/git/refs", { ...repo, ref: `refs/heads/${scratch}`, sha: base });
+  try {
+    const { oid } = await push({ github, exec, repo, branch: scratch, expectedHeadOid: base, message: result.title });
+    if (!oid) throw new Error("the patch changed nothing");
+    try {
+      await github.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", { ...repo, ref: `heads/${branch}`, sha: oid, force: true });
+    } catch (/** @type {any} */ e) {
+      if (e.status !== 422 && e.status !== 404) throw e;
+      await github.request("POST /repos/{owner}/{repo}/git/refs", { ...repo, ref: `refs/heads/${branch}`, sha: oid });
+    }
+  } finally {
+    await github.request("DELETE /repos/{owner}/{repo}/git/refs/{ref}", { ...repo, ref: `heads/${scratch}` });
+  }
+
+  let number = pr?.number;
+  if (pr) {
+    await github.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { ...repo, pull_number: pr.number, title: result.title });
+  } else {
+    const { data } = await github.request("POST /repos/{owner}/{repo}/pulls", {
+      ...repo,
+      title: result.title,
+      head: branch,
+      base: defaultBranch,
+      body: "Automated update to the latest upstream release.",
+    });
+    number = data.number;
+    try {
+      await github.graphql("mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }", {
+        id: data.node_id,
+      });
+    } catch (/** @type {any} */ e) {
+      log(`#${number}: auto-merge not enabled: ${e.message}`);
+    }
+  }
+
+  const labelled = pr?.labels.some((l) => l.name === label);
+  if (result.kind === "unbuildable" && !labelled) {
+    await github.request("POST /repos/{owner}/{repo}/issues/{issue_number}/labels", { ...repo, issue_number: number, labels: [label] });
+  } else if (result.kind === "bumped" && labelled) {
+    await github.request("DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name}", { ...repo, issue_number: number, name: label });
+  }
+  log(`${branch}: #${number} ${pr ? "updated" : "opened"} with ${result.title}`);
+}
+
 const ISSUE_TITLE = "Package update failures";
 
 /**
@@ -168,6 +260,32 @@ export async function run({ github, exec, core, inputs, now = () => new Date() }
     const results = await bumpAll({ exec, names: parseList(stdout), bump: inputs.bump, dir: inputs.dir, timeout: inputs.timeout, log: core.info });
     core.setOutput("results", JSON.stringify(results));
     core.setOutput("failures", JSON.stringify(results.filter((r) => r.kind === "failed")));
+  } else if (inputs.step === "publish") {
+    /** @type {Result[]} */
+    const results = JSON.parse(inputs.results);
+    /** @type {Result[]} */
+    const failures = results.filter((r) => r.kind === "failed");
+    for (const result of results) {
+      if (result.kind !== "bumped" && result.kind !== "unbuildable") continue;
+      try {
+        await publish({
+          github,
+          exec,
+          repo,
+          result: { ...result, title: result.title ?? `${result.name}: update` },
+          base: inputs.base,
+          defaultBranch: inputs["default-branch"],
+          patch: `${inputs.dir}/${result.name}.patch`,
+          label: inputs.label,
+          dryRun,
+          log: core.info,
+        });
+      } catch (/** @type {any} */ e) {
+        core.warning(`${result.name}: ${e.message}`);
+        failures.push({ name: result.name, kind: "failed", reason: `publishing failed: ${e.message}` });
+      }
+    }
+    core.setOutput("failures", JSON.stringify(failures));
   } else if (inputs.step === "report") {
     /** @type {Result[]} */
     const failures = JSON.parse(inputs.failures);

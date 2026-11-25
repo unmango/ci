@@ -5,13 +5,14 @@ type process
 
 let subcommands: array<Cli.subcommand> = []
 
+let fail = message => {
+  Console.error(message)
+  process->setExitCode(2)
+}
+
 switch Cli.parse(subcommands, process->argv->Array.slice(~start=2)) {
 | Help => Console.log(Cli.usage(subcommands))
-| Missing =>
-  Console.error(Cli.usage(subcommands))
-  process->setExitCode(2)
-| Unknown(name) =>
-  Console.error(`unknown subcommand: ${name}\n\n${Cli.usage(subcommands)}`)
-  process->setExitCode(2)
+| Missing => fail(Cli.usage(subcommands))
+| Unknown(name) => fail(`unknown subcommand: ${name}\n\n${Cli.usage(subcommands)}`)
 | Run(s, args) => await s.run(args)
 }

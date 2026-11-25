@@ -37,10 +37,13 @@
           packages.unmango-ci = pkgs.callPackage ./package.nix { };
           packages.default = self'.packages.unmango-ci;
 
-          # The actions run the committed bundle, so it must match a fresh build.
+          # Actions run the committed bundle.
           checks.bundle = pkgs.runCommand "unmango-ci-bundle" { } ''
-            diff ${self'.packages.unmango-ci}/lib/unmango-ci/unmango-ci.mjs ${./dist/unmango-ci.mjs}
-            diff ${self'.packages.unmango-ci}/lib/unmango-ci/unmango-ci.mjs.map ${./dist/unmango-ci.mjs.map}
+            diff -r ${self'.packages.unmango-ci}/lib/unmango-ci ${./dist}
+            ${lib.getExe self'.packages.unmango-ci} --help
+            status=0
+            ${lib.getExe self'.packages.unmango-ci} no-such-subcommand || status=$?
+            [ "$status" -eq 2 ]
             touch $out
           '';
 

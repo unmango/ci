@@ -292,8 +292,8 @@ After changing `src/`, run `npm run build` and commit `dist/`: `checks.bundle` b
 
 ```console
 npm ci
-npm run build                        # rescript build && rolldown -c
-npm test                             # node --test and retest
+npm run build
+npm test
 node --enable-source-maps dist/unmango-ci.mjs --help
-nix run github:unmango/ci -- --help  # packages.unmango-ci, the same bundle
+nix run github:unmango/ci -- --help
 ```

@@ -25,3 +25,9 @@ let usage = subcommands => {
   let lines = subcommands->Array.map(s => `  ${s.name}  ${s.summary}`)
   ["Usage: unmango-ci <subcommand> [args...]", "", "Subcommands:", ...lines]->Array.join("\n")
 }
+
+let parseRepo = (full): Github.repo =>
+  switch full->String.split("/") {
+  | [owner, repo] if owner != "" && repo != "" => {owner, repo}
+  | _ => JsError.throwWithMessage(`not owner/repo: ${full}`)
+  }

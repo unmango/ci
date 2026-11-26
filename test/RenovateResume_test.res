@@ -116,3 +116,67 @@ test("decide reads only a PR's latest run", () =>
 test("decide reports a failing PR whose checkbox is already ticked", () =>
   equals(decide(pr(~body=ticked, 1), red), NoCheckbox)
 )
+
+// Data the API would return, keyed by sha; no client.
+let sources = (~commits=[], ~runs=dict{}, ~prs=[]) => {
+  commits: async _ => commits,
+  runsFor: async sha => runs->Dict.get(sha)->Option.getOr([]),
+  pulls: async () => prs,
+}
+let testPromise = (name, body) =>
+  testAsync(name, done => body()->Promise.thenResolve(() => done())->ignore)
+
+let skipped = [run(1, "completed", Some("skipped"), "2026-01-02T00:00:00Z")]
+
+testPromise("previousFailed walks past commits with no finished run", async () => {
+  let got = await previousFailed(
+    ~before="b",
+    sources(~commits=["b", "c", "d"], ~runs=dict{"b": busy, "c": skipped, "d": red}),
+  )
+  equals(got, true)
+  let got = await previousFailed(
+    ~before="b",
+    sources(~commits=["b", "c"], ~runs=dict{"b": skipped, "c": green}),
+  )
+  equals(got, false)
+})
+
+testPromise("previousFailed is false for a new branch or no history", async () => {
+  let got = await previousFailed(
+    ~before=String.repeat("0", 40),
+    sources(~commits=["b"], ~runs=dict{"b": red}),
+  )
+  equals(got, false)
+  let got = await previousFailed(~before="b", sources())
+  equals(got, false)
+  let got = await previousFailed(~before="b", sources(~commits=["b"]))
+  equals(got, false)
+})
+
+let numbers = plan =>
+  switch plan {
+  | NothingToResume => None
+  | Decided(decided) => Some(decided->Array.map(((pr, d)) => (pr.Github.number, d)))
+  }
+
+testPromise("plan does nothing after a green main", async () => {
+  let got = await plan(
+    ~before="b",
+    sources(~commits=["b"], ~runs=dict{"b": green, "sha1": red}, ~prs=[pr(1)]),
+    opts,
+  )
+  equals(got->numbers, None)
+})
+
+testPromise("plan decides only candidates, in order, after a red main", async () => {
+  let prs = [
+    pr(1),
+    pr(~labels=["renovate:needs-human"], 2),
+    pr(3),
+    pr(~ref="feature/x", 5),
+    pr(~body=ticked, 7),
+  ]
+  let runs = dict{"b": red, "sha1": red, "sha2": red, "sha3": green, "sha5": red, "sha7": red}
+  let got = await plan(~before="b", sources(~commits=["b"], ~runs, ~prs), opts)
+  equals(got->numbers, Some([(1, Tick(ticked)), (3, Ignore), (7, NoCheckbox)]))
+})

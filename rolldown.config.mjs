@@ -11,5 +11,5 @@ export default defineConfig({
   },
   transform: { target: "node24" },
   // Drops the HTTP client @actions/core imports for OIDC alone.
-  treeshake: { moduleSideEffects: false },
+  treeshake: { moduleSideEffects: (id) => !id.includes("/node_modules/@actions/") },
 });

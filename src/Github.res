@@ -1,11 +1,5 @@
 type repo = {owner: string, repo: string}
 
-let parseRepo = full =>
-  switch full->String.split("/") {
-  | [owner, repo] => {owner, repo}
-  | _ => JsError.throwWithMessage(`not owner/repo: ${full}`)
-  }
-
 module Core = {
   type inputOptions = {required: bool}
   @module("@actions/core") external input: (string, inputOptions) => string = "getInput"
@@ -65,8 +59,10 @@ type pulls = {
 type rest = {repos: repos, checks: checks, pulls: pulls}
 
 type t = {rest: rest}
-type options = {auth: string}
-@module("@octokit/rest") @new external make: options => t = "Octokit"
+type options = {auth: string, baseUrl?: string}
+@module("@octokit/rest") @new external octokit: options => t = "Octokit"
+@scope(("process", "env")) @val external apiUrl: option<string> = "GITHUB_API_URL"
+let make = token => octokit({auth: token, baseUrl: ?apiUrl})
 @send
 external paginate: (t, 'params => promise<response<array<'a>>>, 'params) => promise<array<'a>> =
   "paginate"

@@ -56,41 +56,26 @@ let decide = (pr: Github.pullRequest, runs) =>
   | _ => Ignore
   }
 
-let run = async _args => {
-  let input = name => Github.Core.input(name, {required: true})
-  let int = name => input(name)->Int.fromString->Option.getOrThrow
-  let octokit = Github.make({auth: input("token")})
-  let {owner, repo} as full = Github.parseRepo(input("repository"))
-  let before = Github.Core.input("before", {required: false})
-  let checkName = input("check-name")
-  let appId = int("app-id")
-  let depth = int("depth")
-  let opts = {repo: full, prefix: input("branch-prefix"), label: input("label")}
-  let runsFor = async ref => {
-    let {data} = await octokit.rest.checks.listForRef({
-      owner,
-      repo,
-      ref,
-      checkName,
-      appId,
-      filter: "all",
-      perPage: 100,
-    })
-    data.checkRuns
-  }
+type plan =
+  | NothingToResume
+  | Decided(array<(Github.pullRequest, decision)>)
 
-  let previousFailed = async () => {
-    let {data: commits} = await octokit.rest.repos.listCommits({
-      owner,
-      repo,
-      sha: before,
-      perPage: depth,
-    })
+type sources = {
+  commits: string => promise<array<string>>,
+  runsFor: string => promise<array<Github.checkRun>>,
+  pulls: unit => promise<array<Github.pullRequest>>,
+}
+
+let previousFailed = async (~before, {commits, runsFor}) =>
+  if !hasHistory(before) {
+    false
+  } else {
+    let shas = await commits(before)
     let rec walk = async i =>
-      switch commits[i] {
+      switch shas[i] {
       | None => false
-      | Some(c) =>
-        let runs = await runsFor(c.sha)
+      | Some(sha) =>
+        let runs = await runsFor(sha)
         switch commitVerdict(runs) {
         | Some(verdict) => verdict
         | None => await walk(i + 1)
@@ -99,27 +84,68 @@ let run = async _args => {
     await walk(0)
   }
 
-  let resume = hasHistory(before) ? await previousFailed() : false
-  let ticked = []
-  if !resume {
-    Github.Core.info("previous main run did not fail; nothing to resume")
+let plan = async (~before, sources, opts) => {
+  let failed = await previousFailed(~before, sources)
+  if !failed {
+    NothingToResume
   } else {
-    let prs = await octokit->Github.paginate(
-      octokit.rest.pulls.list,
-      {owner, repo, state: "open", perPage: 100},
-    )
-    for i in 0 to prs->Array.length - 1 {
-      let pr = prs->Array.getUnsafe(i)
-      if isCandidate(pr, opts) {
-        let runs = await runsFor(pr.head.sha)
-        switch decide(pr, runs) {
-        | Tick(body) =>
-          let _ = await octokit.rest.pulls.update({owner, repo, pullNumber: pr.number, body})
-          Github.Core.info(`#${pr.number->Int.toString}: ticked the rebase checkbox`)
-          ticked->Array.push(pr.number)
-        | NoCheckbox => Github.Core.info(`#${pr.number->Int.toString}: no unticked rebase checkbox`)
-        | Ignore => ()
-        }
+    let prs = await sources.pulls()
+    let candidates = prs->Array.filter(pr => isCandidate(pr, opts))
+    let decided = await candidates
+    ->Array.map(async pr => {
+      let runs = await sources.runsFor(pr.head.sha)
+      (pr, decide(pr, runs))
+    })
+    ->Promise.all
+    Decided(decided)
+  }
+}
+
+let run = async _args => {
+  let input = name => Github.Core.input(name, {required: false})
+  let toInt = name => input(name)->Int.fromString->Option.getOrThrow
+  let octokit = Github.make(input("token"))
+  let repository = Cli.parseRepo(input("repository"))
+  let {owner, repo} = repository
+  let checkName = input("check-name")
+  let appId = toInt("app-id")
+  let depth = toInt("depth")
+  let opts = {repo: repository, prefix: input("branch-prefix"), label: input("label")}
+  let sources = {
+    commits: async sha => {
+      let {data} = await octokit.rest.repos.listCommits({owner, repo, sha, perPage: depth})
+      data->Array.map(c => c.sha)
+    },
+    runsFor: async ref => {
+      let {data} = await octokit.rest.checks.listForRef({
+        owner,
+        repo,
+        ref,
+        checkName,
+        appId,
+        filter: "all",
+        perPage: 100,
+      })
+      data.checkRuns
+    },
+    pulls: () =>
+      octokit->Github.paginate(octokit.rest.pulls.list, {owner, repo, state: "open", perPage: 100}),
+  }
+
+  let ticked = []
+  switch await plan(~before=input("before"), sources, opts) {
+  | NothingToResume => Github.Core.info("previous main run did not fail; nothing to resume")
+  | Decided(decided) =>
+    for i in 0 to decided->Array.length - 1 {
+      let (pr, decision) = decided->Array.getUnsafe(i)
+      let number = pr.number->Int.toString
+      switch decision {
+      | Tick(body) =>
+        let _ = await octokit.rest.pulls.update({owner, repo, pullNumber: pr.number, body})
+        Github.Core.info(`#${number}: ticked the rebase checkbox`)
+        ticked->Array.push(pr.number)
+      | NoCheckbox => Github.Core.info(`#${number}: no unticked rebase checkbox`)
+      | Ignore => ()
       }
     }
   }

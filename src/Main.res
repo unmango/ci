@@ -14,5 +14,8 @@ switch Cli.parse(subcommands, process->argv->Array.slice(~start=2)) {
 | Help => Console.log(Cli.usage(subcommands))
 | Missing => fail(Cli.usage(subcommands))
 | Unknown(name) => fail(`unknown subcommand: ${name}\n\n${Cli.usage(subcommands)}`)
-| Run(s, args) => await s.run(args)
+| Run(s, args) =>
+  try await s.run(args) catch {
+  | JsExn(e) => Github.Core.setFailed(e->JsExn.message->Option.getOr("failed"))
+  }
 }

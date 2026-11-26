@@ -101,6 +101,25 @@ let checkRuns = async (t, {owner, repo}: repo, ~ref, ~checkName, ~appId) => {
   data.checkRuns
 }
 
+module Git = {
+  type buffer
+  type options = {encoding: string, maxBuffer: float}
+  // Lock files outgrow the 1 MiB default.
+  let options = encoding => {encoding, maxBuffer: 1073741824.}
+
+  @module("node:child_process")
+  external text: (string, array<string>, options) => string = "execFileSync"
+  @module("node:child_process")
+  external bytes: (string, array<string>, options) => buffer = "execFileSync"
+  @send external toString: (buffer, string) => string = "toString"
+
+  let stagedDiff = base =>
+    text("git", ["diff", "--cached", "--raw", "-z", "--no-renames", base], options("utf8"))
+
+  let blobBase64 = blob =>
+    bytes("git", ["cat-file", "blob", blob], options("buffer"))->toString("base64")
+}
+
 type addition = {path: string, blob: string}
 type fileChanges = {additions: array<addition>, deletions: array<string>, refused: array<string>}
 
@@ -175,7 +194,7 @@ mutation($input: CreateCommitOnBranchInput!) {
 // Signed by GitHub, and only if the branch still points at expectedHeadOid.
 // Reads the index's blobs, never the work tree.
 let push = async (t, ~repo, ~branch, ~expectedHeadOid, ~message) =>
-  switch Git.staged(expectedHeadOid)
+  switch Git.stagedDiff(expectedHeadOid)
   ->fileChanges
   ->stage(~repo, ~branch, ~expectedHeadOid, ~message, ~contents=Git.blobBase64, _) {
   | Refused(paths) => Refused(paths)

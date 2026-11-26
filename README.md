@@ -287,8 +287,8 @@ The actions are moving into one ReScript CLI, `unmango-ci`, one subcommand per a
 Until an action is ported it still runs through github-script as described above.
 
 A ported action's only step runs the bundle with its subcommand, passing each input as the `INPUT_<NAME>` variable `@actions/core` reads, since a composite action sets none.
-`src/Github.res` binds the Octokit endpoints and `@actions/core` calls the subcommands use, and nothing else.
-Its `push` commits the staged changes through `createCommitOnBranch`, reading blobs through `src/Git.res`.
+`src/Github.res` binds the Octokit endpoints, `@actions/core` calls and `git` commands the subcommands use.
+Beyond bindings it holds only `push`, which commits the staged changes through `createCommitOnBranch`, so the commit is signed.
 A subcommand's decisions are a pure core its tests cover; its `run` only fetches, calls the core, and writes.
 
 `src/` is the ReScript source and `test/*.res` its `rescript-test` suites.

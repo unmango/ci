@@ -34,7 +34,7 @@
           ...
         }:
         {
-          packages.unmango-ci = pkgs.callPackage ./package.nix { };
+          packages.unmango-ci = pkgs.callPackage ./nix/cli { };
           packages.default = self'.packages.unmango-ci;
 
           # Actions run the committed bundle.

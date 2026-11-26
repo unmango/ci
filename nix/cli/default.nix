@@ -10,19 +10,19 @@ buildNpmPackage {
   version = "0.0.0";
 
   src = lib.fileset.toSource {
-    root = ./.;
+    root = ../..;
     fileset = lib.fileset.unions [
-      ./package.json
-      ./package-lock.json
-      ./rescript.json
-      ./rolldown.config.mjs
-      ./src
-      (lib.fileset.fileFilter (f: f.hasExt "res") ./test)
+      ../../package.json
+      ../../package-lock.json
+      ../../rescript.json
+      ../../rolldown.config.mjs
+      ../../src
+      (lib.fileset.fileFilter (f: f.hasExt "res") ../../test)
     ];
   };
 
   nodejs = nodejs_24;
-  npmDeps = importNpmLock { npmRoot = ./.; };
+  npmDeps = importNpmLock { npmRoot = ../..; };
   npmConfigHook = importNpmLock.npmConfigHook;
 
   nativeBuildInputs = [ makeWrapper ];

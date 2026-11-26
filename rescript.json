@@ -1,0 +1,11 @@
+{
+  "name": "unmango-ci",
+  "sources": [
+    { "dir": "src" },
+    { "dir": "test", "type": "dev" }
+  ],
+  "package-specs": { "module": "esmodule", "in-source": true },
+  "suffix": ".res.mjs",
+  "dev-dependencies": ["rescript-test"],
+  "warnings": { "error": "+a" }
+}

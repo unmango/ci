@@ -280,3 +280,20 @@ The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.
 It also calls `collection-ci.yml`, with this repo's checks standing in for packages, and runs its weekly full build.
 `health.yml` calls `ci-health.yml` for this repo's own issue, and also on PRs, where it writes only the job summary.
+
+## `unmango-ci`
+
+The actions are moving into one ReScript CLI, `unmango-ci`, one subcommand per action (#20, [ADR 0001](docs/adr/0001-rescript-cli.md)).
+Until an action is ported it still runs through github-script as described above.
+
+`src/` is the ReScript source and `test/*.res` its `rescript-test` suites.
+rolldown bundles the compiled output into `dist/unmango-ci.mjs` and its source map, which are committed so an action needs only `node`.
+After changing `src/`, run `npm run build` and commit `dist/`: `checks.bundle` builds the package and fails when the committed bundle differs.
+
+```console
+npm ci
+npm run build
+npm test
+node --enable-source-maps dist/unmango-ci.mjs --help
+nix run github:unmango/ci -- --help
+```

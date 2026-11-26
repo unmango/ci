@@ -274,7 +274,7 @@ Cancelled runs count toward neither the state nor the percentiles, and `unknown`
 
 Each composite action under `.github/actions/` runs the module beside it through `actions/github-script`, which supplies the Octokit client and `core`.
 The workflows use the actions through `$/`, so they come from the same commit.
-`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, `nix-build` runs `nix build`, and `renovate-fixup` reads staged blobs and `package-updates` runs the repo's commands and reads staged blobs, all through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
+`drv-diff` runs `nix-eval-jobs` over its `jobs.nix`, pinned by this repo's `flake.lock`, `nix-build` runs `nix build`, and `package-updates` runs the repo's commands and reads staged blobs, all through github-script's `exec`; `test/jobs.nix` tests `jobs.nix` as `checks.jobs`.
 The modules are typed with JSDoc and checked by `tsc -p jsconfig.json`.
 `nix flake check` runs the type check and the tests; `node --test 'test/*.test.mjs'` runs the tests alone.
 `ci.yml` calls `nix-ci.yml` both ways and holds the gate to ignoring a spoofed status.
@@ -288,6 +288,7 @@ Until an action is ported it still runs through github-script as described above
 
 A ported action's only step runs the bundle with its subcommand, passing each input as the `INPUT_<NAME>` variable `@actions/core` reads, since a composite action sets none.
 `src/Github.res` binds the Octokit endpoints and `@actions/core` calls the subcommands use, and nothing else.
+Its `push` commits the staged changes through `createCommitOnBranch`, reading blobs through `src/Git.res`.
 A subcommand's decisions are a pure core its tests cover; its `run` only fetches, calls the core, and writes.
 
 `src/` is the ReScript source and `test/*.res` its `rescript-test` suites.

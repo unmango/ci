@@ -114,22 +114,8 @@ let run = async _args => {
   let depth = toInt("depth")
   let opts = {repo: repository, prefix: input("branch-prefix"), label: input("label")}
   let sources = {
-    commits: async sha => {
-      let {data} = await octokit.rest.repos.listCommits({owner, repo, sha, perPage: depth})
-      data->Array.map(c => c.sha)
-    },
-    runsFor: async ref => {
-      let {data} = await octokit.rest.checks.listForRef({
-        owner,
-        repo,
-        ref,
-        checkName,
-        appId,
-        filter: "all",
-        perPage: 100,
-      })
-      data.checkRuns
-    },
+    commits: sha => octokit->Github.commitShas(repository, ~sha, ~depth),
+    runsFor: ref => octokit->Github.checkRuns(repository, ~ref, ~checkName, ~appId),
     pulls: () =>
       octokit->Github.paginate(octokit.rest.pulls.list, {owner, repo, state: "open", perPage: 100}),
   }

@@ -3,7 +3,7 @@ type process
 @get external argv: process => array<string> = "argv"
 @set external setExitCode: (process, int) => unit = "exitCode"
 
-let subcommands = [RenovateResume.subcommand]
+let subcommands = [RenovateResume.subcommand, RenovateFixup.subcommand]
 
 let fail = message => {
   Console.error(message)

@@ -69,7 +69,7 @@ test("latestRun breaks a tie by id, past 2^31 too, and orders an unstarted run b
   let tie = [...red, run(2, "completed", Some("success"), "2026-01-01T00:00:00Z")]
   equals(latestRun(tie)->ids, Some("2"))
   equals(
-    latestRun([...tie, {...run(1, "queued", None, ""), id: 3000000001.}])->ids,
+    latestRun([...tie, {...run(1, "queued", None, "2026-01-01T00:00:00Z"), id: 3000000001.}])->ids,
     Some("3000000001"),
   )
   let unstarted = [...red, {...run(2, "queued", None, ""), startedAt: Null}]

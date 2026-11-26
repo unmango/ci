@@ -28,3 +28,16 @@ test("usage lists every subcommand", () =>
     "  gate  Wait for Hercules",
   )
 )
+
+test("parseRepo splits owner/repo", () =>
+  assertion(
+    ~operator="equals",
+    (a, b) => a == b,
+    Cli.parseRepo("o/r"),
+    {Github.owner: "o", repo: "r"},
+  )
+)
+
+test("parseRepo refuses anything else", () =>
+  ["o", "o/r/x", "/r", "o/"]->Array.forEach(full => throws(() => Cli.parseRepo(full)->ignore))
+)

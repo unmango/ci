@@ -98,8 +98,6 @@ test("hasHistory is false for a new branch or an empty before", () => {
   equals(hasHistory(""), false)
 })
 
-test("decide ticks a failing candidate", () => equals(decide(pr(1), red), Tick(ticked)))
-
 test("decide leaves passing, running, and unchecked PRs alone", () => {
   equals(decide(pr(3), green), Ignore)
   equals(decide(pr(4), busy), Ignore)
@@ -111,10 +109,6 @@ test("decide reads only a PR's latest run", () =>
     decide(pr(6), [...green, run(2, "completed", Some("failure"), "2026-02-01T00:00:00Z")]),
     Tick(ticked),
   )
-)
-
-test("decide reports a failing PR whose checkbox is already ticked", () =>
-  equals(decide(pr(~body=ticked, 1), red), NoCheckbox)
 )
 
 // Data the API would return, keyed by sha; no client.

@@ -7,16 +7,9 @@
  * @property {string[]} refused Paths that aren't regular files, or that the App can't write.
  */
 
-/**
- * @typedef {object} CheckRun
- * @property {number} id
- * @property {"queued" | "in_progress" | "completed" | string} status
- * @property {string | null} conclusion
- * @property {string} started_at
- */
+/** @typedef {{ id: number, status: string, conclusion: string | null, started_at: string }} CheckRun */
 
 // Mirrors RenovateResume.commitVerdict until #23.
-
 /** @type {(run: CheckRun) => boolean} */
 const failed = (run) => run.conclusion === "failure" || run.conclusion === "timed_out";
 

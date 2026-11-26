@@ -1,5 +1,3 @@
-import { previousRequiredFailed } from "../renovate-resume/resume.mjs";
-
 /** @import { Core, Exec, Inputs, Octokit, Repo } from "../types.mjs" */
 
 /**
@@ -8,6 +6,47 @@ import { previousRequiredFailed } from "../renovate-resume/resume.mjs";
  * @property {string[]} deletions Paths deleted.
  * @property {string[]} refused Paths that aren't regular files, or that the App can't write.
  */
+
+/**
+ * @typedef {object} CheckRun
+ * @property {number} id
+ * @property {"queued" | "in_progress" | "completed" | string} status
+ * @property {string | null} conclusion
+ * @property {string} started_at
+ */
+
+// Mirrors RenovateResume.commitVerdict until #23.
+
+/** @type {(run: CheckRun) => boolean} */
+const failed = (run) => run.conclusion === "failure" || run.conclusion === "timed_out";
+
+/** @param {CheckRun[]} runs */
+const latest = (runs) => runs.sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at) || b.id - a.id)[0];
+
+/**
+ * @param {{ github: Octokit, repo: Repo, before: string, checkName: string, appId: number, depth: number }} opts
+ * @returns {Promise<boolean>}
+ */
+async function previousRequiredFailed({ github, repo, before, checkName, appId, depth }) {
+  if (!before || /^0+$/.test(before)) return false;
+  const { data: commits } = await github.request("GET /repos/{owner}/{repo}/commits", { ...repo, sha: before, per_page: depth });
+  for (const { sha } of /** @type {{ sha: string }[]} */ (commits)) {
+    const { data } = await github.request("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", {
+      ...repo,
+      ref: sha,
+      check_name: checkName,
+      app_id: appId,
+      filter: "all",
+      per_page: 100,
+    });
+    /** @type {CheckRun[]} */
+    const runs = data.check_runs;
+    // Drops a scheduled run's skipped required and a cancelled run.
+    const run = latest(runs.filter((r) => r.status === "completed" && (r.conclusion === "success" || failed(r))));
+    if (run) return failed(run);
+  }
+  return false;
+}
 
 const REGULAR = new Set(["100644", "100755"]);
 

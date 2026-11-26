@@ -285,6 +285,11 @@ It also calls `collection-ci.yml`, with this repo's checks standing in for packa
 
 The actions are moving into one ReScript CLI, `unmango-ci`, one subcommand per action (#20, [ADR 0001](docs/adr/0001-rescript-cli.md)).
 Until an action is ported it still runs through github-script as described above.
+`renovate-resume` is ported.
+
+A ported action's only step runs the bundle with its subcommand, passing each input as the `INPUT_<NAME>` variable `@actions/core` reads, since a composite action sets none.
+`src/Github.res` binds the Octokit endpoints and `@actions/core` calls the subcommands use, and nothing else.
+A subcommand's decisions are a pure core its tests cover; its `run` only fetches, calls the core, and writes.
 
 `src/` is the ReScript source and `test/*.res` its `rescript-test` suites.
 rolldown bundles the compiled output into `dist/unmango-ci.mjs` and its source map, which are committed so an action needs only `node`.

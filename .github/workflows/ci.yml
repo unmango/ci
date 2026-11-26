@@ -104,8 +104,29 @@ jobs:
           echo "outcome=$OUTCOME verdict=$VERDICT ignored=$IGNORED"
           [ "$OUTCOME" = failure ] && [ "$VERDICT" = timeout ] && [ "$IGNORED" -ge 1 ]
 
+  # The action's real run is on main; this reads every input on a PR.
+  renovate-resume:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: resume
+        uses: ./.github/actions/renovate-resume
+        with:
+          before: "0000000000000000000000000000000000000000"
+      - name: Nothing to resume
+        env:
+          TICKED: ${{ steps.resume.outputs.ticked }}
+        run: '[ "$TICKED" = "[]" ]'
+
   required:
-    needs: [nix, hosted, collection, package-updates, spoofed-status]
+    needs: [nix, hosted, collection, package-updates, spoofed-status, renovate-resume]
     # The weekly build reports through ci-health, not the gate.
     if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest

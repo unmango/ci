@@ -5,6 +5,7 @@ module Core = {
   @module("@actions/core") external input: (string, inputOptions) => string = "getInput"
   @module("@actions/core") external info: string => unit = "info"
   @module("@actions/core") external setOutput: (string, string) => unit = "setOutput"
+  @module("@actions/core") external setFailed: string => unit = "setFailed"
 }
 
 type response<'a> = {data: 'a}
@@ -42,7 +43,20 @@ type listCheckRuns = {
 }
 type checkRuns = {@as("check_runs") checkRuns: array<checkRun>}
 
-type listPulls = {owner: string, repo: string, state: string, @as("per_page") perPage: int}
+type listPulls = {
+  owner: string,
+  repo: string,
+  state: string,
+  head?: string,
+  @as("per_page") perPage: int,
+}
+
+type addLabels = {
+  owner: string,
+  repo: string,
+  @as("issue_number") issueNumber: int,
+  labels: array<string>,
+}
 
 type updatePull = {
   owner: string,
@@ -57,7 +71,8 @@ type pulls = {
   list: listPulls => promise<response<array<pullRequest>>>,
   update: updatePull => promise<response<unknown>>,
 }
-type rest = {repos: repos, checks: checks, pulls: pulls}
+type issues = {addLabels: addLabels => promise<response<unknown>>}
+type rest = {repos: repos, checks: checks, pulls: pulls, issues: issues}
 
 type t = {rest: rest}
 type options = {auth: string, baseUrl?: string}
@@ -67,3 +82,124 @@ let make = token => octokit({auth: token, baseUrl: ?apiUrl})
 @send
 external paginate: (t, 'params => promise<response<array<'a>>>, 'params) => promise<array<'a>> =
   "paginate"
+
+let commitShas = async (t, {owner, repo}: repo, ~sha, ~depth) => {
+  let {data} = await t.rest.repos.listCommits({owner, repo, sha, perPage: depth})
+  data->Array.map(c => c.sha)
+}
+
+let checkRuns = async (t, {owner, repo}: repo, ~ref, ~checkName, ~appId) => {
+  let {data} = await t.rest.checks.listForRef({
+    owner,
+    repo,
+    ref,
+    checkName,
+    appId,
+    filter: "all",
+    perPage: 100,
+  })
+  data.checkRuns
+}
+
+module Git = {
+  type buffer
+  type options = {encoding: string, maxBuffer: float}
+  // Lock files outgrow the 1 MiB default.
+  let options = encoding => {encoding, maxBuffer: 1073741824.}
+
+  @module("node:child_process")
+  external text: (string, array<string>, options) => string = "execFileSync"
+  @module("node:child_process")
+  external bytes: (string, array<string>, options) => buffer = "execFileSync"
+  @send external toString: (buffer, string) => string = "toString"
+
+  let stagedDiff = base =>
+    text("git", ["diff", "--cached", "--raw", "-z", "--no-renames", base], options("utf8"))
+
+  let blobBase64 = blob =>
+    bytes("git", ["cat-file", "blob", blob], options("buffer"))->toString("base64")
+}
+
+type addition = {path: string, blob: string}
+type fileChanges = {additions: array<addition>, deletions: array<string>, refused: array<string>}
+
+let regular = ["100644", "100755"]
+
+// Reads `git diff --cached --raw -z --no-renames` output.
+let fileChanges = raw => {
+  let fields = raw->String.split("\u0000")->Array.filter(f => f != "")
+  let changes = {additions: [], deletions: [], refused: []}
+  for i in 0 to fields->Array.length / 2 - 1 {
+    let path = fields->Array.getUnsafe(2 * i + 1)
+    switch fields->Array.getUnsafe(2 * i)->String.split(" ") {
+    | _ if path->String.startsWith(".github/workflows/") => changes.refused->Array.push(path)
+    | [_, _, _, _, "D"] => changes.deletions->Array.push(path)
+    // A symlink would make the read follow it off the tree.
+    | [_, mode, _, blob, _] if regular->Array.includes(mode) =>
+      changes.additions->Array.push({path, blob})
+    | _ => changes.refused->Array.push(path)
+    }
+  }
+  changes
+}
+
+type branchRef = {repositoryNameWithOwner: string, branchName: string}
+type headline = {headline: string}
+type fileAddition = {path: string, contents: string}
+type fileDeletion = {path: string}
+type fileChangesInput = {additions: array<fileAddition>, deletions: array<fileDeletion>}
+type createCommitInput = {
+  branch: branchRef,
+  expectedHeadOid: string,
+  message: headline,
+  fileChanges: fileChangesInput,
+}
+
+type staged<'a> =
+  | Refused(array<string>)
+  | Unchanged
+  | Commit('a)
+
+let stage = (~repo: repo, ~branch, ~expectedHeadOid, ~message, ~contents, changes: fileChanges) =>
+  switch changes {
+  | {refused} if refused->Array.length > 0 => Refused(refused)
+  | {additions: [], deletions: []} => Unchanged
+  | {additions, deletions} =>
+    Commit({
+      branch: {repositoryNameWithOwner: `${repo.owner}/${repo.repo}`, branchName: branch},
+      expectedHeadOid,
+      message: {headline: message},
+      fileChanges: {
+        additions: additions->Array.map(({path, blob}): fileAddition => {
+          path,
+          contents: contents(blob),
+        }),
+        deletions: deletions->Array.map((path): fileDeletion => {path: path}),
+      },
+    })
+  }
+
+type createCommitVariables = {input: createCommitInput}
+type committed = {oid: string}
+type createdCommit = {commit: committed}
+type createCommitResult = {createCommitOnBranch: createdCommit}
+@send
+external graphql: (t, string, createCommitVariables) => promise<createCommitResult> = "graphql"
+
+let createCommit = `
+mutation($input: CreateCommitOnBranchInput!) {
+  createCommitOnBranch(input: $input) { commit { oid } }
+}`
+
+// Signed by GitHub, and only if the branch still points at expectedHeadOid.
+// Reads the index's blobs, never the work tree.
+let push = async (t, ~repo, ~branch, ~expectedHeadOid, ~message) =>
+  switch Git.stagedDiff(expectedHeadOid)
+  ->fileChanges
+  ->stage(~repo, ~branch, ~expectedHeadOid, ~message, ~contents=Git.blobBase64, _) {
+  | Refused(paths) => Refused(paths)
+  | Unchanged => Unchanged
+  | Commit(input) =>
+    let {createCommitOnBranch: {commit: {oid}}} = await t->graphql(createCommit, {input: input})
+    Commit(oid)
+  }

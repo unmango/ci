@@ -45,12 +45,16 @@ runs:
   using: composite
   steps:
     - id: fixup
-      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      shell: bash
+      # Composite actions pass no INPUT_ variables of their own.
       env:
-        ACTION_PATH: ${{ github.action_path }}
-        INPUTS: ${{ toJSON(inputs) }}
-      with:
-        github-token: ${{ inputs.token }}
-        script: |
-          const { run } = await import(`${process.env.ACTION_PATH}/fixup.mjs`);
-          await run({ github, exec, core, inputs: JSON.parse(process.env.INPUTS) });
+        INPUT_STEP: ${{ inputs.step }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_SHA: ${{ inputs.sha }}
+        INPUT_DEFAULT-BRANCH: ${{ inputs.default-branch }}
+        INPUT_LABEL: ${{ inputs.label }}
+        INPUT_CHECK-NAME: ${{ inputs.check-name }}
+        INPUT_APP-ID: ${{ inputs.app-id }}
+      run: node --enable-source-maps "$GITHUB_ACTION_PATH/../../../dist/unmango-ci.mjs" renovate-fixup

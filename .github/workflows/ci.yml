@@ -125,8 +125,38 @@ jobs:
           TICKED: ${{ steps.resume.outputs.ticked }}
         run: '[ "$TICKED" = "[]" ]'
 
+  # Reads every input of both steps on a PR without writing anything.
+  renovate-fixup:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: push
+        uses: ./.github/actions/renovate-fixup
+        with:
+          step: push
+          token: ${{ github.token }}
+      - id: label
+        uses: ./.github/actions/renovate-fixup
+        with:
+          step: label
+          token: ${{ github.token }}
+          branch: renovate-fixup-smoke/no-such-branch
+          default-branch: main
+      - name: Nothing pushed or labelled
+        env:
+          OID: ${{ steps.push.outputs.oid }}
+          PR: ${{ steps.label.outputs.pr }}
+        run: '[ -z "$OID" ] && [ -z "$PR" ]'
+
   required:
-    needs: [nix, hosted, collection, package-updates, spoofed-status, renovate-resume]
+    needs: [nix, hosted, collection, package-updates, spoofed-status, renovate-resume, renovate-fixup]
     # The weekly build reports through ci-health, not the gate.
     if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest

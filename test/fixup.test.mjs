@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fileChanges, push, labelFailed } from "../.github/actions/renovate-fixup/fixup.mjs";
+import { fileChanges, push } from "../.github/actions/renovate-fixup/fixup.mjs";
 
 const raw = (...entries) => entries.map(([meta, path]) => `${meta}\0${path}\0`).join("");
 
@@ -96,63 +96,4 @@ test("push commits nothing when a change is refused", async () => {
     oid: null,
     refused: ["leak"],
   });
-});
-
-const checkRun = (conclusion) => ({ id: 1, status: "completed", conclusion, started_at: "2026-01-01T00:00:00Z" });
-
-function fakeApi({ main, prs }) {
-  const labelled = [];
-  return {
-    labelled,
-    async request(route, params) {
-      if (route === "GET /repos/{owner}/{repo}/commits") {
-        assert.equal(params.sha, "main");
-        return { data: [{ sha: "m1" }] };
-      }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
-        return { data: { check_runs: main ? [checkRun(main)] : [] } };
-      }
-      if (route === "POST /repos/{owner}/{repo}/issues/{issue_number}/labels") {
-        labelled.push([params.issue_number, params.labels]);
-        return { data: [] };
-      }
-      throw new Error(`unexpected ${route}`);
-    },
-    async paginate(route, params) {
-      assert.equal(route, "GET /repos/{owner}/{repo}/pulls");
-      assert.equal(params.head, "o:renovate/x");
-      return prs;
-    },
-  };
-}
-
-const opts = { repo, branch: "renovate/x", sha: "h1", defaultBranch: "main", label: "renovate:needs-human", checkName: "required", appId: 15368, depth: 5, log() {} };
-
-test("labelFailed labels the PR while main is green", async () => {
-  const github = fakeApi({ main: "success", prs: [{ number: 7, head: { sha: "h1" } }] });
-  assert.equal(await labelFailed({ github, ...opts }), 7);
-  assert.deepEqual(github.labelled, [[7, ["renovate:needs-human"]]]);
-});
-
-test("labelFailed labels when main has no finished required run", async () => {
-  const github = fakeApi({ main: null, prs: [{ number: 7, head: { sha: "h1" } }] });
-  assert.equal(await labelFailed({ github, ...opts }), 7);
-});
-
-test("labelFailed leaves the label off while main is red", async () => {
-  const github = fakeApi({ main: "failure", prs: [{ number: 7, head: { sha: "h1" } }] });
-  assert.equal(await labelFailed({ github, ...opts }), null);
-  assert.deepEqual(github.labelled, []);
-});
-
-test("labelFailed does nothing without a PR", async () => {
-  const github = fakeApi({ main: "success", prs: [] });
-  assert.equal(await labelFailed({ github, ...opts }), null);
-  assert.deepEqual(github.labelled, []);
-});
-
-test("labelFailed leaves a PR alone once Renovate has moved its branch", async () => {
-  const github = fakeApi({ main: "success", prs: [{ number: 7, head: { sha: "h2" } }] });
-  assert.equal(await labelFailed({ github, ...opts }), null);
-  assert.deepEqual(github.labelled, []);
 });

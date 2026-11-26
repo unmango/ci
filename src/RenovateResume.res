@@ -25,14 +25,16 @@ let failed = (run: Github.checkRun) =>
   | _ => false
   }
 
+let startTime = (run: Github.checkRun) =>
+  run.startedAt->Nullable.mapOr(Float.Constants.nan, s => Date.fromString(s)->Date.getTime)
+
 let latestRun = (~completed=false, runs: array<Github.checkRun>) =>
   runs
   ->Array.filter(r => !completed || r.status == "completed")
   ->Array.toSorted((a, b) =>
-    switch Date.fromString(b.startedAt)->Date.getTime -.
-      Date.fromString(a.startedAt)->Date.getTime {
-    | 0. => Int.toFloat(b.id - a.id)
-    | d => d
+    switch startTime(b) -. startTime(a) {
+    | d if d != 0. && !Float.isNaN(d) => d
+    | _ => b.id -. a.id
     }
   )
   ->Array.get(0)
@@ -91,12 +93,12 @@ let plan = async (~before, sources, opts) => {
   } else {
     let prs = await sources.pulls()
     let candidates = prs->Array.filter(pr => isCandidate(pr, opts))
-    let decided = await candidates
-    ->Array.map(async pr => {
+    let decided = []
+    for i in 0 to candidates->Array.length - 1 {
+      let pr = candidates->Array.getUnsafe(i)
       let runs = await sources.runsFor(pr.head.sha)
-      (pr, decide(pr, runs))
-    })
-    ->Promise.all
+      decided->Array.push((pr, decide(pr, runs)))
+    }
     Decided(decided)
   }
 }

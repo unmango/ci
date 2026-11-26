@@ -12,10 +12,11 @@ type response<'a> = {data: 'a}
 type commit = {sha: string}
 
 type checkRun = {
-  id: int,
+  // Check run ids are past 2^31.
+  id: float,
   status: string,
   conclusion: Nullable.t<string>,
-  @as("started_at") startedAt: string,
+  @as("started_at") startedAt: Nullable.t<string>,
 }
 
 type label = {name: string}

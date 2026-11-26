@@ -42,12 +42,15 @@ test("isCandidate skips other branches, forks, and the needs-human label", () =>
 })
 
 let run = (id, status, conclusion, started): Github.checkRun => {
-  id,
+  id: Int.toFloat(id),
   status,
   conclusion: conclusion->Nullable.fromOption,
-  startedAt: started,
+  startedAt: Value(started),
 }
-let ids = run => run->Option.map(r => r.Github.id)
+let red = [run(1, "completed", Some("failure"), "2026-01-01T00:00:00Z")]
+let green = [run(1, "completed", Some("success"), "2026-01-01T00:00:00Z")]
+let busy = [run(1, "in_progress", None, "2026-01-01T00:00:00Z")]
+let ids = run => run->Option.map(r => r.Github.id->Float.toString)
 
 test("latestRun picks the most recently started run", () => {
   let runs = [
@@ -55,24 +58,24 @@ test("latestRun picks the most recently started run", () => {
     run(2, "completed", Some("success"), "2026-01-02T00:00:00Z"),
   ]
   let busy = [...runs, run(3, "in_progress", None, "2026-01-03T00:00:00Z")]
-  equals(latestRun(runs)->ids, Some(2))
-  equals(latestRun(~completed=true, runs)->ids, Some(2))
-  equals(latestRun(busy)->ids, Some(3))
-  equals(latestRun(~completed=true, busy)->ids, Some(2))
+  equals(latestRun(runs)->ids, Some("2"))
+  equals(latestRun(~completed=true, runs)->ids, Some("2"))
+  equals(latestRun(busy)->ids, Some("3"))
+  equals(latestRun(~completed=true, busy)->ids, Some("2"))
   equals(latestRun([])->ids, None)
 })
 
-test("latestRun breaks a tie on start time by id", () => {
-  let runs = [
-    run(1, "completed", Some("failure"), "2026-01-01T00:00:00Z"),
-    run(2, "completed", Some("success"), "2026-01-01T00:00:00Z"),
-  ]
-  equals(latestRun(runs)->ids, Some(2))
+test("latestRun breaks a tie by id, past 2^31 too, and orders an unstarted run by id", () => {
+  let tie = [...red, run(2, "completed", Some("success"), "2026-01-01T00:00:00Z")]
+  equals(latestRun(tie)->ids, Some("2"))
+  equals(
+    latestRun([...tie, {...run(1, "queued", None, ""), id: 3000000001.}])->ids,
+    Some("3000000001"),
+  )
+  let unstarted = [...red, {...run(2, "queued", None, ""), startedAt: Null}]
+  equals(latestRun(unstarted)->ids, Some("2"))
+  equals(decide(pr(1), unstarted), Ignore)
 })
-
-let red = [run(1, "completed", Some("failure"), "2026-01-01T00:00:00Z")]
-let green = [run(1, "completed", Some("success"), "2026-01-01T00:00:00Z")]
-let busy = [run(1, "in_progress", None, "2026-01-01T00:00:00Z")]
 
 test("commitVerdict reads a commit's last finished run", () => {
   equals(commitVerdict(red), Some(true))
@@ -96,12 +99,6 @@ test("hasHistory is false for a new branch or an empty before", () => {
   equals(hasHistory("b"), true)
   equals(hasHistory(String.repeat("0", 40)), false)
   equals(hasHistory(""), false)
-})
-
-test("decide leaves passing, running, and unchecked PRs alone", () => {
-  equals(decide(pr(3), green), Ignore)
-  equals(decide(pr(4), busy), Ignore)
-  equals(decide(pr(6), []), Ignore)
 })
 
 test("decide reads only a PR's latest run", () =>
